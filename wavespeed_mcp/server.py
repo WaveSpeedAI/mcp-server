@@ -757,6 +757,8 @@ def generate_video(
             Note: the underlying API may return the full catalog rather than truly filtering server-side;
             this tool filters the response locally by substring match on model_id as a safety net.
         limit (int, optional): Max number of models to return. Default: 40.
+        request_id (str, optional): Request correlation ID for tracing this call alongside others
+            in the same chain (e.g. list_models then get_model_pricing then generate_video).
 
     Returns:
         JSON list of {model_id, base_price, type, description} for matching models, cheapest first.
@@ -767,19 +769,20 @@ def generate_video(
     mean cheaper/faster/draft-tier).
     """
 )
-def list_models(search: Optional[str] = None, limit: int = 40):
+def list_models(search: Optional[str] = None, limit: int = 40, request_id: str = None):
     """List/search the live WaveSpeed model catalog with pricing."""
-    request_id = str(uuid.uuid4())[:8]
+    if not request_id:
+        request_id = str(uuid.uuid4())[:8]
     try:
         params = {"search": search} if search else {}
         response_data = api_client.get("/models", params=params)
-        models = response_data.get("data", [])
+        models = response_data.get("data") or []
 
         if search:
             needle = search.lower()
-            models = [m for m in models if needle in m.get("model_id", "").lower()]
+            models = [m for m in models if needle in (m.get("model_id") or "").lower()]
 
-        models = sorted(models, key=lambda m: (m.get("base_price") is None, m.get("base_price", 0)))
+        models = sorted(models, key=lambda m: (m.get("base_price") is None, m.get("base_price") or 0))
         trimmed = [
             {
                 "model_id": m.get("model_id"),
@@ -799,6 +802,12 @@ def list_models(search: Optional[str] = None, limit: int = 40):
             type="text",
             text=json.dumps({"status": "error", "error": str(e)}, indent=2),
         )
+    except Exception as e:
+        logger.exception(f"[{request_id}] Unexpected error during list_models: {str(e)}")
+        return TextContent(
+            type="text",
+            text=json.dumps({"status": "error", "error": f"An unexpected error occurred: {str(e)}"}, indent=2),
+        )
 
 
 @mcp.tool(
@@ -812,6 +821,8 @@ def list_models(search: Optional[str] = None, limit: int = 40):
             exact ID.
         inputs (dict, optional): The inputs you plan to submit (prompt, size, duration, etc.), some
             models price differently based on resolution/duration/batch size.
+        request_id (str, optional): Request correlation ID for tracing this call alongside others
+            in the same chain (e.g. list_models then get_model_pricing then generate_video).
 
     Returns:
         JSON with unit_price and currency for the given model_id.
@@ -821,13 +832,14 @@ def list_models(search: Optional[str] = None, limit: int = 40):
     specified.
     """
 )
-def get_model_pricing(model_id: str, inputs: Optional[Dict] = None):
+def get_model_pricing(model_id: str, inputs: Optional[Dict] = None, request_id: str = None):
     """Get the live price for a specific model/inputs combination."""
-    request_id = str(uuid.uuid4())[:8]
+    if not request_id:
+        request_id = str(uuid.uuid4())[:8]
     try:
         payload = {"model_id": model_id, "inputs": inputs or {}}
         response_data = api_client.post("/model/pricing", json=payload)
-        data = response_data.get("data", {})
+        data = response_data.get("data") or {}
         return TextContent(
             type="text",
             text=json.dumps({"status": "success", **data}, indent=2),
@@ -837,6 +849,15 @@ def get_model_pricing(model_id: str, inputs: Optional[Dict] = None):
         return TextContent(
             type="text",
             text=json.dumps({"status": "error", "error": str(e), "model_id": model_id}, indent=2),
+        )
+    except Exception as e:
+        logger.exception(f"[{request_id}] Unexpected error during get_model_pricing: {str(e)}")
+        return TextContent(
+            type="text",
+            text=json.dumps(
+                {"status": "error", "error": f"An unexpected error occurred: {str(e)}", "model_id": model_id},
+                indent=2,
+            ),
         )
 
 
