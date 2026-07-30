@@ -748,6 +748,119 @@ def generate_video(
     )
 
 
+@mcp.tool(
+    description="""List WaveSpeed AI models, optionally filtered by a search term. Always hits the live
+    WaveSpeed catalog, never hardcoded, so results reflect the current model lineup and prices.
+
+    Args:
+        search (str, optional): Term to filter model IDs/names by (e.g. "wan-2.2", "flux", "z-image").
+            Note: the underlying API may return the full catalog rather than truly filtering server-side;
+            this tool filters the response locally by substring match on model_id as a safety net.
+        limit (int, optional): Max number of models to return. Default: 40.
+        request_id (str, optional): Request correlation ID for tracing this call alongside others
+            in the same chain (e.g. list_models then get_model_pricing then generate_video).
+
+    Returns:
+        JSON list of {model_id, base_price, type, description} for matching models, cheapest first.
+
+    Use this before generate_video / text_to_image / image_to_image when you don't already know the
+    exact model_id you want, or when you want to compare prices across variants (e.g. "-lora",
+    "-ultra-fast", "-720p" suffixes usually mean higher quality/cost; "-480p"/"-ultra-fast" usually
+    mean cheaper/faster/draft-tier).
+    """
+)
+def list_models(search: Optional[str] = None, limit: int = 40, request_id: str = None):
+    """List/search the live WaveSpeed model catalog with pricing."""
+    if not request_id:
+        request_id = str(uuid.uuid4())[:8]
+    try:
+        params = {"search": search} if search else {}
+        response_data = api_client.get("/models", params=params)
+        models = response_data.get("data") or []
+
+        if search:
+            needle = search.lower()
+            models = [m for m in models if needle in (m.get("model_id") or "").lower()]
+
+        models = sorted(models, key=lambda m: (m.get("base_price") is None, m.get("base_price") or 0))
+        trimmed = [
+            {
+                "model_id": m.get("model_id"),
+                "base_price": m.get("base_price"),
+                "type": m.get("type"),
+                "description": (m.get("description") or "")[:140],
+            }
+            for m in models[:limit]
+        ]
+        return TextContent(
+            type="text",
+            text=json.dumps({"status": "success", "count": len(trimmed), "models": trimmed}, indent=2),
+        )
+    except (WavespeedAuthError, WavespeedRequestError, WavespeedTimeoutError) as e:
+        logger.error(f"[{request_id}] list_models failed: {str(e)}")
+        return TextContent(
+            type="text",
+            text=json.dumps({"status": "error", "error": str(e)}, indent=2),
+        )
+    except Exception as e:
+        logger.exception(f"[{request_id}] Unexpected error during list_models: {str(e)}")
+        return TextContent(
+            type="text",
+            text=json.dumps({"status": "error", "error": f"An unexpected error occurred: {str(e)}"}, indent=2),
+        )
+
+
+@mcp.tool(
+    description="""Get the exact live price for a specific WaveSpeed model + inputs before generating.
+    Always hits the live WaveSpeed pricing API, never hardcoded, so it reflects current prices even
+    if the model's cost changes after this tool was written.
+
+    Args:
+        model_id (str): Required. Full model ID, e.g. "wavespeed-ai/z-image/turbo" or
+            "wavespeed-ai/wan-2.2/i2v-480p-ultra-fast". Use list_models first if you don't know the
+            exact ID.
+        inputs (dict, optional): The inputs you plan to submit (prompt, size, duration, etc.), some
+            models price differently based on resolution/duration/batch size.
+        request_id (str, optional): Request correlation ID for tracing this call alongside others
+            in the same chain (e.g. list_models then get_model_pricing then generate_video).
+
+    Returns:
+        JSON with unit_price and currency for the given model_id.
+
+    Call this before generate_video / text_to_image / image_to_image whenever cost matters, rather
+    than assuming a model's price from memory or from what a tool defaults to when no model is
+    specified.
+    """
+)
+def get_model_pricing(model_id: str, inputs: Optional[Dict] = None, request_id: str = None):
+    """Get the live price for a specific model/inputs combination."""
+    if not request_id:
+        request_id = str(uuid.uuid4())[:8]
+    try:
+        payload = {"model_id": model_id, "inputs": inputs or {}}
+        response_data = api_client.post("/model/pricing", json=payload)
+        data = response_data.get("data") or {}
+        return TextContent(
+            type="text",
+            text=json.dumps({"status": "success", **data}, indent=2),
+        )
+    except (WavespeedAuthError, WavespeedRequestError, WavespeedTimeoutError) as e:
+        logger.error(f"[{request_id}] get_model_pricing failed: {str(e)}")
+        return TextContent(
+            type="text",
+            text=json.dumps({"status": "error", "error": str(e), "model_id": model_id}, indent=2),
+        )
+    except Exception as e:
+        logger.exception(f"[{request_id}] Unexpected error during get_model_pricing: {str(e)}")
+        return TextContent(
+            type="text",
+            text=json.dumps(
+                {"status": "error", "error": f"An unexpected error occurred: {str(e)}", "model_id": model_id},
+                indent=2,
+            ),
+        )
+
+
 def main():
     print("Starting WaveSpeed MCP server")
     """Run the WaveSpeed MCP server"""
