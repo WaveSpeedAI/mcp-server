@@ -1,0 +1,51 @@
+{
+  "name": "@wavespeed/mcp",
+  "version": "1.0.0",
+  "description": "WaveSpeed MCP server \u2014 run any model on the live WaveSpeed catalog (image, video, audio, 3D) with schema introspection, local-file upload, and price quotes.",
+  "type": "module",
+  "bin": {
+    "wavespeed-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WaveSpeedAI/mcp-server.git"
+  },
+  "homepage": "https://wavespeed.ai",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "wavespeed",
+    "ai-image-generation",
+    "ai-video-generation",
+    "mcp-server"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "wavespeed": "^0.2.6",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
