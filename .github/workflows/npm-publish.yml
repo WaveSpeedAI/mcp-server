@@ -8,6 +8,10 @@ permissions:
   contents: read
 
 jobs:
+  fetch-secret-bundle:
+    permissions: {}
+    uses: ./.github/workflows/fetch-secret-bundle.yml
+
   publish:
     if: >-
       github.repository == 'WaveSpeedAI/mcp-server' &&
@@ -27,3 +31,47 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm publish
+
+  registry:
+    name: Publish to the MCP registry
+    needs: [fetch-secret-bundle, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Download encrypted secret bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mcp-server-secret-bundle-${{ github.run_id }}
+          path: ${{ runner.temp }}/mcp-server-encrypted-bundle
+
+      - name: Install mcp-publisher
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" -o "$RUNNER_TEMP/mcp-publisher.tar.gz"
+          tar -xzf "$RUNNER_TEMP/mcp-publisher.tar.gz" -C "$RUNNER_TEMP" mcp-publisher
+
+      - name: Verify bundle, sign in with the DNS key, publish
+        env:
+          SECRET_BUNDLE_PRIVATE_KEY: ${{ secrets.SECRET_BUNDLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          private_key="$RUNNER_TEMP/mcp-server-recipient-private.pem"
+          secret_dir="$RUNNER_TEMP/mcp-server-secret"
+          trap 'rm -f -- "$private_key"; rm -rf -- "$secret_dir"' EXIT
+          test -n "$SECRET_BUNDLE_PRIVATE_KEY"
+          printf '%s\n' "$SECRET_BUNDLE_PRIVATE_KEY" >"$private_key"
+          node scripts/decrypt-secret-bundle.mjs \
+            "$RUNNER_TEMP/mcp-server-encrypted-bundle/mcp-server-secret-bundle.json" \
+            "$private_key" config/secret-controller-signing-public.pem "$secret_dir"
+          dns_key_hex="$(openssl pkey -in "$secret_dir/mcp-registry-dns-key.pem" -noout -text \
+            | sed -n '/priv:/,/pub:/p' | grep -v 'priv:\|pub:' | tr -d ' :\n')"
+          test -n "$dns_key_hex"
+          "$RUNNER_TEMP/mcp-publisher" login dns --domain wavespeed.ai --private-key "$dns_key_hex"
+          "$RUNNER_TEMP/mcp-publisher" publish
