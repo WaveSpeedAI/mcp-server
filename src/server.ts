@@ -111,7 +111,7 @@ export function createServer(): McpServer {
   server.tool(
     'get_model_schema',
     "Get a model's real input schema (required fields, properties, defaults). Call this before run_model so inputs match what the model actually accepts.",
-    { model: z.string().describe('Model ID from list_models, e.g. google/nano-banana-2/text-to-image') },
+    { model: z.string().describe('Model ID from list_models, e.g. bytedance/seedream-v5.0-pro') },
     { readOnlyHint: true, openWorldHint: true },
     async ({ model }) => {
       const models = await fetchModels();
