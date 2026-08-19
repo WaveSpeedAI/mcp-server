@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "ai.wavespeed/mcp",
+  "description": "Run any model on the live WaveSpeed catalog: image, video, audio, 3D.",
+  "repository": {
+    "url": "https://github.com/WaveSpeedAI/mcp-server",
+    "source": "github"
+  },
+  "version": "1.0.2",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@wavespeed/mcp",
+      "version": "1.0.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "WAVESPEED_API_KEY",
+          "description": "WaveSpeed API key (https://wavespeed.ai/accesskey). Optional when the wavespeed CLI is logged in.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ],
+  "websiteUrl": "https://wavespeed.ai"
+}
