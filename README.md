@@ -1,3 +1,12 @@
+<div align="center">
+  <a href="https://wavespeed.ai" target="_blank">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/wavespeed-logo-dark.svg">
+      <img src="assets/wavespeed-logo-light.svg" alt="WaveSpeed" width="342" height="48"/>
+    </picture>
+  </a>
+</div>
+
 # WaveSpeed MCP Server
 
 [中文](README.zh.md)
