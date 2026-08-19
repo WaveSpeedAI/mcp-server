@@ -12,6 +12,7 @@
 // * Price quotes name the inputs they were blind to instead of presenting
 //   the formula's floor as "the" price.
 
+import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { Client } from 'wavespeed';
@@ -28,6 +29,9 @@ import { getApiKey, getBaseUrl } from './lib/config.js';
 import { resolveLocalFiles } from './lib/local-files.js';
 import { uploadWithCache } from './lib/upload-cache.js';
 import { missingPriceVars, isFloorQuote } from './lib/pricing-vars.js';
+
+const require = createRequire(import.meta.url);
+const { version: PKG_VERSION } = require('../package.json') as { version: string };
 
 const PRICE_DISCLAIMER =
   'Estimate only, for reference — the amount actually charged for a run is authoritative.';
@@ -59,7 +63,7 @@ function ok(payload: unknown) {
 
 export function createServer(): McpServer {
   const server = new McpServer(
-    { name: 'wavespeed', version: '1.0.0' },
+    { name: 'wavespeed', version: PKG_VERSION },
     {
       instructions: [
         'WaveSpeed AI media generation (image, video, audio, 3D).',
@@ -84,6 +88,7 @@ export function createServer(): McpServer {
       limit: z.number().int().min(1).max(200).default(30).describe('Max results'),
       refresh: z.boolean().default(false).describe('Bypass the 1h catalog cache'),
     },
+    { readOnlyHint: true, openWorldHint: true },
     async ({ query, type, limit, refresh }) => {
       const models = await fetchModels({ refresh });
       const q = query?.toLowerCase();
@@ -107,6 +112,7 @@ export function createServer(): McpServer {
     'get_model_schema',
     "Get a model's real input schema (required fields, properties, defaults). Call this before run_model so inputs match what the model actually accepts.",
     { model: z.string().describe('Model ID from list_models, e.g. google/nano-banana-2/text-to-image') },
+    { readOnlyHint: true, openWorldHint: true },
     async ({ model }) => {
       const models = await fetchModels();
       const meta = models.find((m) => m.model_id === model);
@@ -141,6 +147,7 @@ export function createServer(): McpServer {
         .default(600)
         .describe('Max seconds to wait; 0 = submit only and return the prediction id'),
     },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async ({ model, input, wait_seconds }) => {
       const resolved = await resolveLocalFiles(input as Record<string, unknown>, {
         upload: async (p) => (await uploadFile(p)).url,
@@ -172,8 +179,17 @@ export function createServer(): McpServer {
       model: z.string().describe('Model ID from list_models'),
       input: z.record(z.unknown()).default({}).describe('Inputs the quote should account for'),
     },
+    { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async ({ model, input }) => {
-      const data = await fetchPricing(model, input as Record<string, unknown>);
+      // Resolve @path markers exactly like run_model: pricing formulas often
+      // read the file itself (get_duration_v3(audio)), so quoting with the
+      // literal "@./a.mp3" string would silently collapse to the floor. The
+      // 24h content-hash cache means the later run reuses this upload.
+      const resolved = await resolveLocalFiles(input as Record<string, unknown>, {
+        upload: async (p) => (await uploadFile(p)).url,
+      });
+      const priceInput = resolved.input;
+      const data = await fetchPricing(model, priceInput);
       // The pricing endpoint accepts partial inputs without complaint — a
       // formula whose variables are all missing collapses to base_price, the
       // floor of the model's range. Name what the quote could not see.
@@ -184,10 +200,10 @@ export function createServer(): McpServer {
         const meta = models.find((m) => m.model_id === model);
         unpriced = missingPriceVars(
           meta?.formula,
-          input as Record<string, unknown>,
+          priceInput,
           requestSchema(meta ?? ({} as LiveModel))?.properties,
         );
-        atFloor = isFloorQuote(meta?.formula, input as Record<string, unknown>);
+        atFloor = isFloorQuote(meta?.formula, priceInput);
       } catch {
         /* no catalog — the generic disclaimer still applies */
       }
@@ -201,7 +217,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool('get_balance', 'Show the WaveSpeed account credit balance.', {}, async () => {
+  server.tool('get_balance', 'Show the WaveSpeed account credit balance.', {}, { readOnlyHint: true, openWorldHint: true }, async () => {
     return ok(await fetchBalance());
   });
 
@@ -209,6 +225,7 @@ export function createServer(): McpServer {
     'upload_file',
     'Upload a local file to WaveSpeed and get its hosted URL (identical bytes reuse the same upload for 24h). Usually unnecessary — run_model handles "@./path" inputs itself.',
     { path: z.string().describe('Local file path') },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     async ({ path: filePath }) => {
       return ok(await uploadFile(filePath));
     },
@@ -218,6 +235,7 @@ export function createServer(): McpServer {
     'get_prediction',
     'Fetch the status and outputs of a past or in-flight prediction by id — use to recover a run that hit the wait limit.',
     { id: z.string().describe('Prediction id returned by run_model') },
+    { readOnlyHint: true, openWorldHint: true },
     async ({ id }) => {
       const item = await fetchPrediction(id);
       return ok({
