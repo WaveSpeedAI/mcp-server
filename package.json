@@ -1,6 +1,6 @@
 {
   "name": "@wavespeed/mcp",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "WaveSpeed MCP server \u2014 run any model on the live WaveSpeed catalog (image, video, audio, 3D) with schema introspection, local-file upload, and price quotes.",
   "type": "module",
   "bin": {
