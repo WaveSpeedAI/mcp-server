@@ -7,7 +7,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { createRequire } from 'node:module';
 import { getApiKey, getBaseUrl } from './config.js';
+
+const require = createRequire(import.meta.url);
+const { version: PKG_VERSION } = require('../../package.json') as { version: string };
+
+// Channel-attribution headers (X-Client-Name / X-Client-Version / X-Client-OS),
+// following the wavespeed-desktop convention. The WAVESPEED_CLIENT_NAME
+// environment variable overrides the name so wrapper channels can brand
+// themselves without code changes.
+export function clientAttributionHeaders(): Record<string, string> {
+  const platform = os.platform();
+  return {
+    'X-Client-Name': process.env.WAVESPEED_CLIENT_NAME || 'wavespeed-mcp',
+    'X-Client-Version': PKG_VERSION,
+    'X-Client-OS': platform === 'win32' ? 'windows' : platform,
+  };
+}
 
 export interface LiveModel {
   model_id: string;
@@ -91,7 +108,7 @@ function authHeaders(): Record<string, string> {
       'No WaveSpeed API key configured. Set WAVESPEED_API_KEY, or run `wavespeed login`.',
     );
   }
-  return { Authorization: `Bearer ${apiKey}` };
+  return { Authorization: `Bearer ${apiKey}`, ...clientAttributionHeaders() };
 }
 
 async function apiGet<T>(apiPath: string): Promise<T> {
