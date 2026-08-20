@@ -9,6 +9,13 @@
 
 # WaveSpeed MCP Server
 
+<a href="https://cursor.com/install-mcp?name=wavespeed&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkB3YXZlc3BlZWQvbWNwIl0sImVudiI6eyJXQVZFU1BFRURfQVBJX0tFWSI6Indza18uLi4ifX0%3D">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://cursor.com/deeplink/mcp-install-light.svg">
+    <img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Add wavespeed MCP server to Cursor" height="32"/>
+  </picture>
+</a>
+
 <!-- mcp-name: ai.wavespeed/mcp -->
 
 An MCP server for the [WaveSpeed](https://wavespeed.ai) platform: run any model on the **live catalog** — image, video, audio, 3D — from Claude Code, Claude Desktop, Cursor, Cline, or any MCP client.
