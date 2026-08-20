@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.1.0/mcp.schema.json",
+  "mcpServers": {
+    "wavespeed": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@wavespeed/mcp"],
+      "env": {
+        "WAVESPEED_API_KEY": "${WAVESPEED_API_KEY}"
+      }
+    }
+  }
+}
