@@ -9,8 +9,6 @@
 
 # WaveSpeed MCP Server
 
-[中文](README.zh.md)
-
 <!-- mcp-name: ai.wavespeed/mcp -->
 
 An MCP server for the [WaveSpeed](https://wavespeed.ai) platform: run any model on the **live catalog** — image, video, audio, 3D — from Claude Code, Claude Desktop, Cursor, Cline, or any MCP client.

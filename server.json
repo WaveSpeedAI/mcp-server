@@ -6,12 +6,12 @@
     "url": "https://github.com/WaveSpeedAI/mcp-server",
     "source": "github"
   },
-  "version": "1.0.5",
+  "version": "1.0.6",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@wavespeed/mcp",
-      "version": "1.0.5",
+      "version": "1.0.6",
       "transport": {
         "type": "stdio"
       },
@@ -21,6 +21,20 @@
           "description": "WaveSpeed API key (https://wavespeed.ai/accesskey). Optional when the wavespeed CLI is logged in.",
           "isRequired": false,
           "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "WAVESPEED_BASE_URL",
+          "description": "Override the WaveSpeed API base URL. Defaults to https://api.wavespeed.ai.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "WAVESPEED_CLIENT_NAME",
+          "description": "Override the client name reported for channel attribution. Defaults to wavespeed-mcp.",
+          "isRequired": false,
+          "isSecret": false,
           "format": "string"
         }
       ]
