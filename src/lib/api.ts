@@ -198,7 +198,7 @@ export async function waitForPrediction(
   for (;;) {
     const item = await fetchPrediction(id);
     if (item.status === 'completed') return item;
-    if (item.status === 'failed' || item.status === 'cancelled' || item.status === 'timeout') {
+    if (item.status === 'failed' || item.status === 'cancelled' || item.status === 'timeout' || item.status === 'deleted') {
       throw new Error(
         `Prediction ${item.status}${item.error ? `: ${item.error}` : ''} (task_id: ${id})`,
       );
