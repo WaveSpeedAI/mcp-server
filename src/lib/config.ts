@@ -1,8 +1,8 @@
 // API key + base URL resolution.
 //
 // Precedence: WAVESPEED_API_KEY / WAVESPEED_BASE_URL env vars, then the
-// wavespeed CLI's stored config (~/.config/wavespeed-nodejs/config.json,
-// written by `wavespeed login`). Reading the CLI's store means one login
+// wavespeed CLI's stored config (written by `wavespeed login`; location is
+// per-platform, see cliConfigPath). Reading the CLI's store means one login
 // covers both tools — the MCP server never implements its own auth flow.
 
 import fs from 'node:fs';
@@ -16,13 +16,24 @@ interface CliConfig {
   baseUrl?: string;
 }
 
-function cliConfigPath(): string {
-  // conf@N with projectName "wavespeed" resolves to <config>/wavespeed-nodejs/config.json
-  const base =
-    process.env.XDG_CONFIG_HOME && process.env.XDG_CONFIG_HOME !== ''
-      ? process.env.XDG_CONFIG_HOME
-      : path.join(os.homedir(), '.config');
-  return path.join(base, 'wavespeed-nodejs', 'config.json');
+// Mirrors conf's env-paths resolution (projectName "wavespeed", suffix
+// "nodejs"), which is per-platform — a Linux-only path would miss every
+// `wavespeed login` done on macOS or Windows.
+export function cliConfigPath(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = os.homedir(),
+): string {
+  const name = 'wavespeed-nodejs';
+  if (platform === 'darwin') {
+    return path.join(home, 'Library', 'Preferences', name, 'config.json');
+  }
+  if (platform === 'win32') {
+    const appData = env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    return path.join(appData, name, 'Config', 'config.json');
+  }
+  const base = env.XDG_CONFIG_HOME || path.join(home, '.config');
+  return path.join(base, name, 'config.json');
 }
 
 function readCliConfig(): CliConfig {

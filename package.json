@@ -1,7 +1,7 @@
 {
   "name": "@wavespeed/mcp",
-  "version": "1.0.7",
-  "description": "WaveSpeed MCP server \u2014 run any model on the live WaveSpeed catalog (image, video, audio, 3D) with schema introspection, local-file upload, and price quotes.",
+  "version": "1.0.8",
+  "description": "WaveSpeed MCP server — run any model on the live WaveSpeed catalog (image, video, audio, 3D) with schema introspection, local-file upload, and price quotes.",
   "type": "module",
   "bin": {
     "wavespeed-mcp": "dist/index.js"
@@ -39,7 +39,7 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "wavespeed": "^0.2.6",
+    "wavespeed": "^0.3.2",
     "zod": "^3.24.0"
   },
   "devDependencies": {

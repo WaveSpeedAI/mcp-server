@@ -23,12 +23,16 @@ import {
   fetchPrediction,
   submitPrediction,
   waitForPrediction,
+  MCP_CLIENT_NAME,
+  TERMINAL_FAILURES,
   type LiveModel,
+  type Prediction,
 } from './lib/api.js';
 import { getApiKey, getBaseUrl } from './lib/config.js';
 import { resolveLocalFiles } from './lib/local-files.js';
 import { uploadWithCache } from './lib/upload-cache.js';
 import { missingPriceVars, isFloorQuote } from './lib/pricing-vars.js';
+import { findUnknownInputs } from './lib/validate-inputs.js';
 
 const require = createRequire(import.meta.url);
 const { version: PKG_VERSION } = require('../package.json') as { version: string };
@@ -53,8 +57,75 @@ function compactModel(m: LiveModel) {
 async function uploadFile(filePath: string): Promise<{ url: string; cached: boolean }> {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No API key configured (WAVESPEED_API_KEY or `wavespeed login`).');
-  const client = new Client(apiKey, { baseUrl: getBaseUrl() });
+  const client = new Client(apiKey, { baseUrl: getBaseUrl(), clientName: MCP_CLIENT_NAME });
   return uploadWithCache(filePath, (p) => client.upload(p));
+}
+
+// Default wait for run_model. Many MCP clients abort a tool call after 60s,
+// and an aborted call never delivers the prediction id — so return before
+// that with the id in hand. Longer waits are opt-in via wait_seconds.
+const DEFAULT_WAIT_SECONDS = 50;
+const POLL_INTERVAL_MS = 2000;
+
+const STILL_RUNNING_HINT =
+  'Still running on the server — generations can take minutes to hours. ' +
+  'Call get_prediction with this id (optionally with wait_seconds) to check again.';
+
+type ToolExtra = {
+  signal: AbortSignal;
+  _meta?: { progressToken?: string | number };
+  sendNotification: (n: {
+    method: 'notifications/progress';
+    params: { progressToken: string | number; progress: number; message?: string };
+  }) => Promise<void>;
+};
+
+// Emits notifications/progress while polling when the client asked for it.
+// Each one carries the prediction id, and clients that reset their timeout
+// on progress keep a long wait alive.
+function progressTicker(extra: ToolExtra, id: string, startedAt: number) {
+  const token = extra._meta?.progressToken;
+  if (token === undefined) return undefined;
+  let n = 0;
+  return async (item: Prediction) => {
+    const secs = Math.floor((Date.now() - startedAt) / 1000);
+    await extra
+      .sendNotification({
+        method: 'notifications/progress',
+        params: { progressToken: token, progress: ++n, message: `prediction ${id}: ${item.status} (${secs}s)` },
+      })
+      .catch(() => {
+        /* progress is advisory */
+      });
+  };
+}
+
+// Reject inputs the model's schema does not declare. The API silently drops
+// unknown keys and still bills the run, so this is the last free moment to
+// catch an invented parameter. Fails open when no schema is available, and
+// re-fetches the catalog once before rejecting so a stale cache can't block
+// a valid input.
+async function assertKnownInputs(model: string, input: Record<string, unknown>): Promise<void> {
+  let report;
+  try {
+    report = findUnknownInputs(input, (await fetchModels()).find((m) => m.model_id === model));
+    if (report) {
+      const fresh = await fetchModels({ refresh: true });
+      report = findUnknownInputs(input, fresh.find((m) => m.model_id === model));
+    }
+  } catch {
+    return; // catalog unreachable — validation is best-effort
+  }
+  if (!report) return;
+  const hints = report.unknown.map((k) => {
+    const s = report!.suggestions.get(k);
+    return s ? `${k} (did you mean ${s}?)` : k;
+  });
+  throw new Error(
+    `Model ${model} does not accept: ${hints.join(', ')}. The API silently drops unknown ` +
+      `inputs and still bills the run, so nothing was submitted. Accepted inputs: ` +
+      `${report.known.join(', ')}. See get_model_schema.`,
+  );
 }
 
 function ok(payload: unknown) {
@@ -71,7 +142,9 @@ export function createServer(): McpServer {
         'inputs, run_model to execute. Reference local files as "@./path"',
         'values inside input — they upload automatically; bare paths are',
         'passed through untouched and will fail model validation.',
-        'Use get_price before expensive runs. Never invent model IDs.',
+        'Use get_price before expensive runs. Never invent model IDs or input keys.',
+        'Long generations (video, some audio/3D) can run for hours: when',
+        'run_model returns done=false, keep the id and poll get_prediction.',
       ].join(' '),
     },
   );
@@ -133,7 +206,7 @@ export function createServer(): McpServer {
 
   server.tool(
     'run_model',
-    'Run any WaveSpeed model. input keys come from get_model_schema. Local files: pass "@./path" string values — they are uploaded and replaced with hosted URLs (bare paths are NOT uploaded). Returns output URLs. If the wait limit is hit, the task keeps running; recover it with get_prediction.',
+    'Run any WaveSpeed model. input keys come from get_model_schema; unknown keys are rejected before submission. Local files: pass "@./path" string values — they are uploaded and replaced with hosted URLs (bare paths are NOT uploaded). Returns output URLs when done=true. Some generations take minutes to hours: if the wait ends first, the result has done=false and the prediction id — the task keeps running, so check it with get_prediction.',
     {
       model: z.string().describe('Model ID from list_models'),
       input: z
@@ -144,30 +217,42 @@ export function createServer(): McpServer {
         .int()
         .min(0)
         .max(1800)
-        .default(600)
-        .describe('Max seconds to wait; 0 = submit only and return the prediction id'),
+        .default(DEFAULT_WAIT_SECONDS)
+        .describe(
+          `Max seconds to wait before returning the still-running prediction id (default ${DEFAULT_WAIT_SECONDS}); 0 = submit only`,
+        ),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ model, input, wait_seconds }) => {
+    async ({ model, input, wait_seconds }, extra) => {
       const resolved = await resolveLocalFiles(input as Record<string, unknown>, {
         upload: async (p) => (await uploadFile(p)).url,
       });
+      await assertKnownInputs(model, resolved.input);
       const started = Date.now();
       const submitted = await submitPrediction(model, resolved.input);
       if (wait_seconds === 0) {
-        return ok({ id: submitted.id, status: submitted.status, model });
+        return ok({ id: submitted.id, status: submitted.status, model, done: false, next: STILL_RUNNING_HINT });
       }
-      const done = await waitForPrediction(submitted.id, {
-        intervalMs: 2000,
+      const { item, done } = await waitForPrediction(submitted.id, {
+        intervalMs: POLL_INTERVAL_MS,
         timeoutMs: wait_seconds * 1000,
+        onTick: progressTicker(extra, submitted.id, started),
+        signal: extra.signal,
       });
+      if (TERMINAL_FAILURES.includes(item.status)) {
+        throw new Error(
+          `Prediction ${item.status}${item.error ? `: ${item.error}` : ''} (task_id: ${submitted.id})`,
+        );
+      }
       return ok({
         id: submitted.id,
         model,
-        status: done.status,
-        outputs: done.outputs ?? [],
+        status: item.status,
+        done,
+        outputs: item.outputs ?? [],
         elapsed_ms: Date.now() - started,
         uploaded_files: resolved.uploaded,
+        ...(done ? {} : { next: STILL_RUNNING_HINT }),
       });
     },
   );
@@ -233,18 +318,35 @@ export function createServer(): McpServer {
 
   server.tool(
     'get_prediction',
-    'Fetch the status and outputs of a past or in-flight prediction by id — use to recover a run that hit the wait limit.',
-    { id: z.string().describe('Prediction id returned by run_model') },
+    'Fetch the status and outputs of a past or in-flight prediction by id — use to pick up a run that returned done=false. Pass wait_seconds to keep waiting for it to finish.',
+    {
+      id: z.string().describe('Prediction id returned by run_model'),
+      wait_seconds: z
+        .number()
+        .int()
+        .min(0)
+        .max(1800)
+        .default(0)
+        .describe('Max seconds to wait for a terminal status; 0 = return the current status now'),
+    },
     { readOnlyHint: true, openWorldHint: true },
-    async ({ id }) => {
-      const item = await fetchPrediction(id);
+    async ({ id, wait_seconds }, extra) => {
+      const started = Date.now();
+      const { item, done } = await waitForPrediction(id, {
+        intervalMs: POLL_INTERVAL_MS,
+        timeoutMs: wait_seconds * 1000,
+        onTick: wait_seconds > 0 ? progressTicker(extra, id, started) : undefined,
+        signal: extra.signal,
+      });
       return ok({
         id: item.id,
         model: item.model,
         status: item.status,
+        done,
         outputs: item.outputs ?? [],
         error: item.error,
         created_at: item.created_at,
+        ...(done ? {} : { next: STILL_RUNNING_HINT }),
       });
     },
   );

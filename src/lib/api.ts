@@ -17,10 +17,12 @@ const { version: PKG_VERSION } = require('../../package.json') as { version: str
 // following the wavespeed-desktop convention. The WAVESPEED_CLIENT_NAME
 // environment variable overrides the name so wrapper channels can brand
 // themselves without code changes.
+export const MCP_CLIENT_NAME = 'wavespeed-mcp';
+
 export function clientAttributionHeaders(): Record<string, string> {
   const platform = os.platform();
   return {
-    'X-Client-Name': process.env.WAVESPEED_CLIENT_NAME || 'wavespeed-mcp',
+    'X-Client-Name': process.env.WAVESPEED_CLIENT_NAME || MCP_CLIENT_NAME,
     'X-Client-Version': PKG_VERSION,
     'X-Client-OS': platform === 'win32' ? 'windows' : platform,
   };
@@ -63,12 +65,12 @@ interface CacheFile {
   models: LiveModel[];
 }
 
-function readCache(baseUrl: string): LiveModel[] | null {
+function readCache(baseUrl: string): CacheFile | null {
   try {
     const parsed = JSON.parse(fs.readFileSync(cachePath(), 'utf8')) as CacheFile;
     if (parsed.base_url !== baseUrl) return null;
     if (Date.now() - parsed.fetched_at > CACHE_TTL_MS) return null;
-    return parsed.models;
+    return parsed;
   } catch {
     return null;
   }
@@ -131,14 +133,30 @@ async function apiPost<T>(apiPath: string, body: unknown): Promise<T> {
   return json.data;
 }
 
+// The server is a long-lived process, so keep the parsed catalog in memory
+// instead of re-reading the ~2MB disk cache on every tool call. Same 1h TTL;
+// the disk cache still lets a fresh process start without a network fetch.
+let memCache: { baseUrl: string; fetchedAt: number; models: LiveModel[] } | null = null;
+
 export async function fetchModels(opts: { refresh?: boolean } = {}): Promise<LiveModel[]> {
   const baseUrl = getBaseUrl();
   if (!opts.refresh) {
+    if (
+      memCache &&
+      memCache.baseUrl === baseUrl &&
+      Date.now() - memCache.fetchedAt <= CACHE_TTL_MS
+    ) {
+      return memCache.models;
+    }
     const cached = readCache(baseUrl);
-    if (cached) return cached;
+    if (cached) {
+      memCache = { baseUrl, fetchedAt: cached.fetched_at, models: cached.models };
+      return cached.models;
+    }
   }
   const models = await apiGet<LiveModel[]>('/api/v3/models');
   writeCache(baseUrl, models);
+  memCache = { baseUrl, fetchedAt: Date.now(), models };
   return models;
 }
 
@@ -188,27 +206,35 @@ export async function fetchPrediction(id: string): Promise<Prediction> {
   return apiGet<Prediction>(`/api/v3/predictions/${id}/result`);
 }
 
-/** Poll a prediction until it reaches a terminal status. */
+export const TERMINAL_FAILURES = ['failed', 'cancelled', 'timeout', 'deleted'];
+
+/**
+ * Poll a prediction until it reaches a terminal status (done=true, whether
+ * completed or failed — the caller decides what a failure means) or the wait
+ * budget runs out. Running out is NOT an error: generations can take hours,
+ * so the caller gets the still-running prediction back (done=false) and
+ * reports its id instead of losing it in a thrown message. `onTick` fires
+ * after every non-terminal poll.
+ */
 export async function waitForPrediction(
   id: string,
-  opts: { intervalMs?: number; timeoutMs?: number } = {},
-): Promise<Prediction> {
+  opts: {
+    intervalMs?: number;
+    timeoutMs?: number;
+    onTick?: (item: Prediction) => void | Promise<void>;
+    signal?: AbortSignal;
+  } = {},
+): Promise<{ item: Prediction; done: boolean }> {
   const interval = opts.intervalMs ?? 1000;
-  const deadline = opts.timeoutMs ? Date.now() + opts.timeoutMs : undefined;
+  const deadline = opts.timeoutMs !== undefined ? Date.now() + opts.timeoutMs : undefined;
   for (;;) {
     const item = await fetchPrediction(id);
-    if (item.status === 'completed') return item;
-    if (item.status === 'failed' || item.status === 'cancelled' || item.status === 'timeout' || item.status === 'deleted') {
-      throw new Error(
-        `Prediction ${item.status}${item.error ? `: ${item.error}` : ''} (task_id: ${id})`,
-      );
+    if (item.status === 'completed' || TERMINAL_FAILURES.includes(item.status)) {
+      return { item, done: true };
     }
-    if (deadline && Date.now() > deadline) {
-      throw new Error(
-        `Still ${item.status} after the wait limit (task_id: ${id}). ` +
-          `The task keeps running server-side — check it later with get_prediction.`,
-      );
-    }
+    await opts.onTick?.(item);
+    if (opts.signal?.aborted) return { item, done: false };
+    if (deadline !== undefined && Date.now() + interval > deadline) return { item, done: false };
     await new Promise((r) => setTimeout(r, interval));
   }
 }

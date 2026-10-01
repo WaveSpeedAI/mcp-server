@@ -33,13 +33,13 @@ Built on the same design as the open-source [`@wavespeed/cli`](https://github.co
 |---|---|
 | `list_models` | Search the live catalog by text or modality type |
 | `get_model_schema` | A model's real input schema (required, properties, defaults) |
-| `run_model` | Submit + wait; `@path` inputs upload automatically; returns output URLs |
+| `run_model` | Submit + wait; rejects input keys the model doesn't accept; `@path` inputs upload automatically; returns output URLs |
 | `get_price` | Cost estimate with `unpriced_inputs` / `at_base_price` disclosure |
 | `get_balance` | Account credit balance |
 | `upload_file` | Local file → hosted URL (24h content-hash dedupe) |
-| `get_prediction` | Recover status/outputs of any run by id |
+| `get_prediction` | Status/outputs of any run by id; optional `wait_seconds` to wait for it |
 
-If `run_model` hits its wait limit the task keeps running server-side — the error names the prediction id, and `get_prediction` picks it up.
+Some generations take minutes to hours. `run_model` waits up to `wait_seconds` (default 50, max 1800) and then returns `done: false` with the prediction id — the task keeps running server-side, and `get_prediction` picks it up. While waiting, both tools send MCP progress notifications that carry the prediction id.
 
 ## Setup
 
