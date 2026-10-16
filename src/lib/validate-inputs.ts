@@ -25,6 +25,29 @@ export function requestSchemaProps(model: LiveModel | undefined): string[] | nul
   return keys.length > 0 ? keys : null;
 }
 
+/**
+ * Legacy field names a model still accepts, as `legacy -> canonical`.
+ *
+ * The API renames public fields without breaking old callers by declaring the
+ * old name in the property's `x-aliases` (e.g. `last_image` carries
+ * `["end_image"]`) and folding it into the canonical name before validation.
+ * A legacy name is therefore a valid input, not a typo — it just is not listed
+ * as an accepted input, so schema-driven UIs show only the current name.
+ */
+export function requestSchemaAliases(model: LiveModel | undefined): Map<string, string> {
+  const aliases = new Map<string, string>();
+  const props = model?.api_schema?.api_schemas?.[0]?.request_schema?.properties;
+  if (!props) return aliases;
+  for (const [name, def] of Object.entries(props as Record<string, { 'x-aliases'?: unknown }>)) {
+    const declared = def?.['x-aliases'];
+    if (!Array.isArray(declared)) continue;
+    for (const alias of declared) {
+      if (typeof alias === 'string' && alias !== name) aliases.set(alias, name);
+    }
+  }
+  return aliases;
+}
+
 // Small edit distance for typo hints — inputs are short snake_case tokens, so
 // a full Levenshtein over ≤40 keys is nothing.
 function editDistance(a: string, b: string): number {
@@ -65,7 +88,8 @@ export function findUnknownInputs(
   const known = requestSchemaProps(model);
   if (!known) return null;
   const knownSet = new Set(known);
-  const unknown = Object.keys(input).filter((k) => !knownSet.has(k));
+  const aliases = requestSchemaAliases(model);
+  const unknown = Object.keys(input).filter((k) => !knownSet.has(k) && !aliases.has(k));
   if (unknown.length === 0) return null;
   const suggestions = new Map<string, string>();
   for (const k of unknown) {
