@@ -99,8 +99,11 @@ async function httpError(res: Response, method: string, apiPath: string): Promis
   } catch {
     /* non-JSON body — fall back below */
   }
-  if (detail) return new Error(detail);
-  return new Error(`${method} ${apiPath} failed: ${res.status} ${res.statusText}`);
+  const err: Error & { status?: number } = detail
+    ? new Error(detail)
+    : new Error(`${method} ${apiPath} failed: ${res.status} ${res.statusText}`);
+  err.status = res.status;
+  return err;
 }
 
 function authHeaders(): Record<string, string> {
@@ -113,12 +116,49 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${apiKey}`, ...clientAttributionHeaders() };
 }
 
-async function apiGet<T>(apiPath: string): Promise<T> {
-  const res = await fetch(`${getBaseUrl()}${apiPath}`, { headers: authHeaders() });
+// A hung socket would otherwise stall the tool call until the client gives
+// up. 30s is far above a healthy read, so it only trips on a dead connection.
+const GET_TIMEOUT_MS = 30_000;
+
+async function apiGetOnce<T>(apiPath: string): Promise<T> {
+  const res = await fetch(`${getBaseUrl()}${apiPath}`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(GET_TIMEOUT_MS),
+  });
   if (!res.ok) throw await httpError(res, 'GET', apiPath);
   const json = (await res.json()) as Envelope<T>;
   if (json.code !== 200) throw new Error(json.message || `API returned code ${json.code}`);
   return json.data;
+}
+
+// Same set as wavespeed-python. An error with no HTTP status is a network
+// failure or timeout; envelope/JSON errors are not transient.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const MAX_GET_RETRIES = 5;
+
+function isTransient(err: any): boolean {
+  if (typeof err?.status === 'number') return RETRYABLE_STATUS.has(err.status);
+  return err instanceof TypeError || err?.name === 'TimeoutError' || err?.name === 'AbortError';
+}
+
+// Read-only GETs only — submit (POST) is deliberately never retried.
+async function apiGet<T>(
+  apiPath: string,
+  opts: { retryDelayMs?: number; describe?: (reason: string, attempts: number) => string } = {},
+): Promise<T> {
+  const delay = opts.retryDelayMs ?? 1000;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await apiGetOnce<T>(apiPath);
+    } catch (err: any) {
+      const reason = err?.message ?? String(err);
+      if (!isTransient(err) && !opts.describe) throw err;
+      if (!isTransient(err) || attempt >= MAX_GET_RETRIES) {
+        throw new Error(opts.describe ? opts.describe(reason, attempt + 1) : reason);
+      }
+      await new Promise((r) => setTimeout(r, delay * (attempt + 1)));
+    }
+  }
 }
 
 async function apiPost<T>(apiPath: string, body: unknown): Promise<T> {
@@ -202,8 +242,19 @@ export async function submitPrediction(
   return apiPost<Prediction>(`/api/v3/${model}`, { ...input });
 }
 
-export async function fetchPrediction(id: string): Promise<Prediction> {
-  return apiGet<Prediction>(`/api/v3/predictions/${id}/result`);
+// The message always carries the task id and says the task was not declared
+// failed — a status read that dies after submit must not look like a lost
+// (or failed) paid task.
+export async function fetchPrediction(
+  id: string,
+  opts: { retryDelayMs?: number } = {},
+): Promise<Prediction> {
+  return apiGet<Prediction>(`/api/v3/predictions/${id}/result`, {
+    retryDelayMs: opts.retryDelayMs,
+    describe: (reason, attempts) =>
+      `Could not read the status of task ${id} after ${attempts} attempt${attempts > 1 ? 's' : ''}: ${reason}. ` +
+      `The task was created and may still be running — call get_prediction with id "${id}" to check it (task_id: ${id}).`,
+  });
 }
 
 export const TERMINAL_FAILURES = ['failed', 'cancelled', 'timeout', 'deleted'];
@@ -214,12 +265,13 @@ export const TERMINAL_FAILURES = ['failed', 'cancelled', 'timeout', 'deleted'];
  * budget runs out. Running out is NOT an error: generations can take hours,
  * so the caller gets the still-running prediction back (done=false) and
  * reports its id instead of losing it in a thrown message. `onTick` fires
- * after every non-terminal poll.
+ * after every non-terminal poll. Transient status-read failures are retried.
  */
 export async function waitForPrediction(
   id: string,
   opts: {
     intervalMs?: number;
+    retryDelayMs?: number;
     timeoutMs?: number;
     onTick?: (item: Prediction) => void | Promise<void>;
     signal?: AbortSignal;
@@ -228,7 +280,7 @@ export async function waitForPrediction(
   const interval = opts.intervalMs ?? 1000;
   const deadline = opts.timeoutMs !== undefined ? Date.now() + opts.timeoutMs : undefined;
   for (;;) {
-    const item = await fetchPrediction(id);
+    const item = await fetchPrediction(id, { retryDelayMs: opts.retryDelayMs });
     if (item.status === 'completed' || TERMINAL_FAILURES.includes(item.status)) {
       return { item, done: true };
     }
