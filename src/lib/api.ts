@@ -116,9 +116,12 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${apiKey}`, ...clientAttributionHeaders() };
 }
 
-// A hung socket would otherwise stall the tool call until the client gives
-// up. 30s is far above a healthy read, so it only trips on a dead connection.
-const GET_TIMEOUT_MS = 30_000;
+// Per-request timeouts (no overall cap). A hung socket would otherwise stall
+// the tool call. Read-only GETs are far below 30s in practice (result p99.9
+// < 1s); the async submit gets more headroom because a timeout there is an
+// ambiguous outcome, not a clean failure.
+export const GET_TIMEOUT_MS = 30_000;
+export const SUBMIT_TIMEOUT_MS = 60_000;
 
 async function apiGetOnce<T>(apiPath: string): Promise<T> {
   const res = await fetch(`${getBaseUrl()}${apiPath}`, {
@@ -161,11 +164,12 @@ async function apiGet<T>(
   }
 }
 
-async function apiPost<T>(apiPath: string, body: unknown): Promise<T> {
+async function apiPost<T>(apiPath: string, body: unknown, opts: { timeoutMs?: number } = {}): Promise<T> {
   const res = await fetch(`${getBaseUrl()}${apiPath}`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: opts.timeoutMs ? AbortSignal.timeout(opts.timeoutMs) : undefined,
   });
   if (!res.ok) throw await httpError(res, 'POST', apiPath);
   const json = (await res.json()) as Envelope<T>;
@@ -239,7 +243,17 @@ export async function submitPrediction(
   model: string,
   input: Record<string, unknown>,
 ): Promise<Prediction> {
-  return apiPost<Prediction>(`/api/v3/${model}`, { ...input });
+  try {
+    return await apiPost<Prediction>(`/api/v3/${model}`, { ...input }, { timeoutMs: SUBMIT_TIMEOUT_MS });
+  } catch (err: any) {
+    // Never retried: the server may already have created (and billed) the task.
+    if (err?.name === 'TimeoutError') {
+      throw new Error(
+        `Submission outcome unknown: no response within ${SUBMIT_TIMEOUT_MS / 1000}s. The task may have been created and billed — do not resubmit blindly; if you have a prediction id, check it with get_prediction.`,
+      );
+    }
+    throw err;
+  }
 }
 
 // The message always carries the task id and says the task was not declared

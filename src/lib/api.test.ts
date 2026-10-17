@@ -123,3 +123,32 @@ describe('polling retries', () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('per-request timeouts', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+  const okBody = () => new Response(JSON.stringify({ code: 200, data: { id: 't1', status: 'completed' } }));
+
+  it('submit uses a 60s signal and status GET 30s', async () => {
+    vi.stubEnv('WAVESPEED_API_KEY', 'test');
+    const spy = vi.spyOn(AbortSignal, 'timeout');
+    globalThis.fetch = vi.fn(async () => okBody()) as unknown as typeof fetch;
+    await submitPrediction('m/x', {});
+    await waitForPrediction('t1', { retryDelayMs: 1 });
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([60_000, 30_000]);
+  });
+
+  it('submit timeout gives the ambiguous message with exactly one POST', async () => {
+    vi.stubEnv('WAVESPEED_API_KEY', 'test');
+    const fn = vi.fn(async () => {
+      throw new DOMException('timed out', 'TimeoutError');
+    });
+    globalThis.fetch = fn as unknown as typeof fetch;
+    await expect(submitPrediction('m/x', {})).rejects.toThrow(/outcome unknown.*may have been created/);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
