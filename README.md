@@ -63,7 +63,7 @@ https://api.wavespeed.ai/mcp
 - **VS Code:** `code --add-mcp '{"name":"wavespeed","type":"http","url":"https://api.wavespeed.ai/mcp"}'`
 - **Any other client that sends request headers:** point it at the URL with `Authorization: Bearer <your API key>`.
 
-The hosted server has the same tools except for files: it cannot read files on your computer, so pass public URLs, use `create_upload` from a tool that can send HTTP requests (it returns a temporary upload address and the `download_url` to use as an input), or, in ChatGPT, attach the file to the chat (the `upload_attachment` tool, which only ChatGPT can fill, imports it and returns a `download_url`). Full guide: [wavespeed.ai/docs/mcp](https://wavespeed.ai/docs/mcp).
+The hosted server has the same tools with two differences. `run_model` returns the prediction ID immediately and the assistant fetches the result with `get_prediction` (passing `wait_seconds` to wait), so a long generation never holds a connection open. And for files: it cannot read files on your computer, so pass public URLs, use `create_upload` from a tool that can send HTTP requests (it returns a temporary upload address and the `download_url` to use as an input), or, in ChatGPT, attach the file to the chat (the `upload_attachment` tool, which only ChatGPT can fill, imports it and returns a `download_url`). Full guide: [wavespeed.ai/docs/mcp](https://wavespeed.ai/docs/mcp).
 
 ### Local (npx)
 
