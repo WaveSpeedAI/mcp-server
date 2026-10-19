@@ -6,12 +6,12 @@
     "url": "https://github.com/WaveSpeedAI/mcp-server",
     "source": "github"
   },
-  "version": "1.0.10",
+  "version": "1.0.11",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@wavespeed/mcp",
-      "version": "1.0.10",
+      "version": "1.0.11",
       "transport": {
         "type": "stdio"
       },
@@ -38,6 +38,12 @@
           "format": "string"
         }
       ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.wavespeed.ai/mcp"
     }
   ],
   "websiteUrl": "https://wavespeed.ai"

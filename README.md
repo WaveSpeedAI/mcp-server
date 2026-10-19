@@ -43,6 +43,30 @@ Some generations take minutes to hours. `run_model` waits up to `wait_seconds` (
 
 ## Setup
 
+### Remote (nothing to install)
+
+The same server is hosted at:
+
+```text
+https://api.wavespeed.ai/mcp
+```
+
+- **Claude on the web / ChatGPT:** add a custom connector with that address and approve the connection on the WaveSpeed page that opens. Approving creates a dedicated API key (named `MCP · <app>`) that you can delete on the [API Keys](https://wavespeed.ai/accesskey) page to disconnect.
+- **Claude Code:** `claude mcp add --transport http wavespeed https://api.wavespeed.ai/mcp`
+- **Cursor:**
+  <a href="https://cursor.com/install-mcp?name=wavespeed&config=eyJ1cmwiOiJodHRwczovL2FwaS53YXZlc3BlZWQuYWkvbWNwIn0%3D">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://cursor.com/deeplink/mcp-install-light.svg">
+      <img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Add the hosted wavespeed MCP server to Cursor" height="32"/>
+    </picture>
+  </a>
+- **VS Code:** `code --add-mcp '{"name":"wavespeed","type":"http","url":"https://api.wavespeed.ai/mcp"}'`
+- **Any other client that sends request headers:** point it at the URL with `Authorization: Bearer <your API key>`.
+
+The hosted server has the same tools except for files: it cannot read files on your computer, so pass public URLs, or use `create_upload` from a tool that can send HTTP requests (it returns a temporary upload address and the `download_url` to use as an input). Full guide: [wavespeed.ai/docs/mcp](https://wavespeed.ai/docs/mcp).
+
+### Local (npx)
+
 Auth resolves from `WAVESPEED_API_KEY`, or from the CLI's stored login (`wavespeed login`) — one login covers both tools. Keys: [wavespeed.ai/accesskey](https://wavespeed.ai/accesskey).
 
 **Claude Code**
