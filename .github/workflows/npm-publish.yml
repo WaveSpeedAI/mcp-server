@@ -45,6 +45,9 @@ jobs:
           curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" -o "$RUNNER_TEMP/mcp-publisher.tar.gz"
           tar -xzf "$RUNNER_TEMP/mcp-publisher.tar.gz" -C "$RUNNER_TEMP" mcp-publisher
 
+      - name: Wait for the npm release to be visible
+        run: bash scripts/wait-for-npm.sh server.json
+
       - name: Sign in with the DNS key and publish
         env:
           # The ed25519 DNS-auth key (PEM). Source of truth lives in
