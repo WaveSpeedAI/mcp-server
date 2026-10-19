@@ -61,15 +61,16 @@ async function uploadFile(filePath: string): Promise<{ url: string; cached: bool
   return uploadWithCache(filePath, (p) => client.upload(p));
 }
 
-// Default wait for run_model. Many MCP clients abort a tool call after 60s,
-// and an aborted call never delivers the prediction id — so return before
-// that with the id in hand. Longer waits are opt-in via wait_seconds.
-const DEFAULT_WAIT_SECONDS = 50;
+// run_model submits and returns the prediction id right away (same as the
+// hosted server); the assistant then waits with get_prediction. Many MCP
+// clients abort a tool call after 60s and an aborted call never delivers the
+// id, so a long wait is opt-in via wait_seconds.
+const DEFAULT_WAIT_SECONDS = 0;
 const POLL_INTERVAL_MS = 2000;
 
 const STILL_RUNNING_HINT =
-  'Still running on the server — generations can take minutes to hours. ' +
-  'Call get_prediction with this id (optionally with wait_seconds) to check again.';
+  'The run was submitted and is processing on the server. Call get_prediction with this id and wait_seconds ' +
+  'until done=true; it returns the output URLs. Do not submit the same run again: a new run is billed again.';
 
 type ToolExtra = {
   signal: AbortSignal;
@@ -206,7 +207,7 @@ export function createServer(): McpServer {
 
   server.tool(
     'run_model',
-    'Run any WaveSpeed model. input keys come from get_model_schema; unknown keys are rejected before submission. Local files: pass "@./path" string values — they are uploaded and replaced with hosted URLs (bare paths are NOT uploaded). Returns output URLs when done=true. Some generations take minutes to hours: if the wait ends first, the result has done=false and the prediction id — the task keeps running, so check it with get_prediction.',
+    'Run any WaveSpeed model. input keys come from get_model_schema; unknown keys are rejected before submission. Local files: pass "@./path" string values — they are uploaded and replaced with hosted URLs (bare paths are NOT uploaded). Returns the prediction id right away (done=false); call get_prediction with that id and wait_seconds until done=true to get the output URLs. The task keeps running on the server. Pass wait_seconds here to wait for a quick model in the same call.',
     {
       model: z.string().describe('Model ID from list_models'),
       input: z
@@ -219,7 +220,7 @@ export function createServer(): McpServer {
         .max(1800)
         .default(DEFAULT_WAIT_SECONDS)
         .describe(
-          `Max seconds to wait before returning the still-running prediction id (default ${DEFAULT_WAIT_SECONDS}); 0 = submit only`,
+          `Max seconds to wait for the result in this call (default ${DEFAULT_WAIT_SECONDS}: return the prediction id right away)`,
         ),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },

@@ -39,7 +39,7 @@ Built on the same design as the open-source [`@wavespeed/cli`](https://github.co
 | `upload_file` | Local file → hosted URL (24h content-hash dedupe) |
 | `get_prediction` | Status/outputs of any run by id; optional `wait_seconds` to wait for it |
 
-Some generations take minutes to hours. `run_model` waits up to `wait_seconds` (default 50, max 1800) and then returns `done: false` with the prediction id — the task keeps running server-side, and `get_prediction` picks it up. While waiting, both tools send MCP progress notifications that carry the prediction id.
+Some generations take minutes to hours. `run_model` submits the run and returns the prediction id right away (`done: false`); the assistant then calls `get_prediction` with that id and `wait_seconds` (max 1800) until `done` is `true`. The task keeps running server-side, so a dropped connection loses nothing. Pass `wait_seconds` to `run_model` to wait for a quick model in the same call. While waiting, both tools send MCP progress notifications that carry the prediction id.
 
 ## Setup
 
@@ -63,7 +63,7 @@ https://api.wavespeed.ai/mcp
 - **VS Code:** `code --add-mcp '{"name":"wavespeed","type":"http","url":"https://api.wavespeed.ai/mcp"}'`
 - **Any other client that sends request headers:** point it at the URL with `Authorization: Bearer <your API key>`.
 
-The hosted server has the same tools with two differences. `run_model` returns the prediction ID immediately and the assistant fetches the result with `get_prediction` (passing `wait_seconds` to wait), so a long generation never holds a connection open. And for files: it cannot read files on your computer, so pass public URLs, use `create_upload` from a tool that can send HTTP requests (it returns a temporary upload address and the `download_url` to use as an input), or, in ChatGPT, attach the file to the chat (the `upload_attachment` tool, which only ChatGPT can fill, imports it and returns a `download_url`). Full guide: [wavespeed.ai/docs/mcp](https://wavespeed.ai/docs/mcp).
+The hosted server has the same tools, with one difference for files: it cannot read files on your computer, so pass public URLs, use `create_upload` from a tool that can send HTTP requests (it returns a temporary upload address and the `download_url` to use as an input), or, in ChatGPT, attach the file to the chat (the `upload_attachment` tool, which only ChatGPT can fill, imports it and returns a `download_url`). Full guide: [wavespeed.ai/docs/mcp](https://wavespeed.ai/docs/mcp).
 
 ### Local (npx)
 
