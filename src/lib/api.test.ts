@@ -7,7 +7,7 @@ import {
   fetchBillings,
   fetchUsageStats,
   deletePredictions,
-  modelDocsUrl,
+  modelPlaygroundUrl,
 } from './api.js';
 
 const ORIGINAL_ENV = process.env.WAVESPEED_CLIENT_NAME;
@@ -219,13 +219,10 @@ describe('history, billings and usage', () => {
   });
 });
 
-describe('modelDocsUrl', () => {
-  it('links the docs page, dropping the wavespeed-ai prefix and joining the rest with dashes', () => {
-    expect(modelDocsUrl('google/nano-banana-2.1/edit')).toBe(
-      'https://wavespeed.ai/docs/docs-api/google/google-nano-banana-2.1-edit',
-    );
-    expect(modelDocsUrl('wavespeed-ai/infinitetalk/multi')).toBe(
-      'https://wavespeed.ai/docs/docs-api/wavespeed-ai/infinitetalk-multi',
+describe('modelPlaygroundUrl', () => {
+  it('links the model page, keeping every path segment', () => {
+    expect(modelPlaygroundUrl('google/nano-banana-2.1/edit')).toBe(
+      'https://wavespeed.ai/models/google/nano-banana-2.1/edit',
     );
   });
 });

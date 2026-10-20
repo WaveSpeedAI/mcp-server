@@ -32,9 +32,9 @@ Built on the same design as the open-source [`@wavespeed/cli`](https://github.co
 | Tool | What it does |
 |---|---|
 | `list_models` | Search the live catalog by text or modality type |
-| `get_model_schema` | A model's real input schema (required, properties, defaults), with a link to the model's docs page |
+| `get_model_schema` | A model's real input schema (required, properties, defaults), with a link to the model's playground page |
 | `run_model` | Submit + wait; rejects input keys the model doesn't accept; `@path` inputs upload automatically; returns output URLs |
-| `get_price` | Cost estimate for the inputs you pass (no charge), with a link to the model's docs page |
+| `get_price` | Cost estimate for the inputs you pass (no charge), with a link to the model's playground page |
 | `get_balance` | Account credit balance, with the top-up link |
 | `list_predictions` | Run history (default last 24h); filter by model, status, time range |
 | `list_billings` | Itemized charges and refunds (needs a Billing-access key) |

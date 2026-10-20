@@ -9,8 +9,8 @@
 // * Inputs are never mutated. The one explicit transform is the `@path`
 //   marker, which uploads the referenced local file and substitutes its
 //   hosted URL. Bare paths pass through untouched.
-// * Price quotes are estimates for the inputs given; the model's docs page
-//   is linked next to them for what each input means.
+// * Price quotes are estimates for the inputs given; the model's playground
+//   page is linked next to them for what each input means.
 
 import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -25,7 +25,7 @@ import {
   deletePredictions,
   PREDICTION_STATUSES,
   fetchPricing,
-  modelDocsUrl,
+  modelPlaygroundUrl,
   fetchPrediction,
   submitPrediction,
   waitForPrediction,
@@ -217,7 +217,7 @@ export function createServer(): McpServer {
         required: schema?.required ?? [],
         properties: schema?.properties ?? {},
         property_order: schema?.['x-order-properties'] ?? [],
-        docs_url: modelDocsUrl(meta.model_id),
+        playground_url: modelPlaygroundUrl(meta.model_id),
       });
     },
   );
@@ -293,7 +293,7 @@ export function createServer(): McpServer {
       });
       const priceInput = resolved.input;
       const data = await fetchPricing(model, priceInput);
-      return ok({ ...data, estimate: true, disclaimer: PRICE_DISCLAIMER, docs_url: modelDocsUrl(model) });
+      return ok({ ...data, estimate: true, disclaimer: PRICE_DISCLAIMER, playground_url: modelPlaygroundUrl(model) });
     },
   );
 

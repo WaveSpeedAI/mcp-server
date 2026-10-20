@@ -256,12 +256,9 @@ export async function fetchUsageStats(startTime: string, endTime: string, model?
   return apiPost('/api/v3/user/usage_stats', body, { timeoutMs: GET_TIMEOUT_MS });
 }
 
-// The model's page on the docs site (same rule as the dashboard's model page
-// link): provider folder, then the id without a leading "wavespeed-ai/" and
-// with "/" turned into "-".
-export function modelDocsUrl(modelId: string): string {
-  const provider = modelId.split('/')[0];
-  return `https://wavespeed.ai/docs/docs-api/${provider}/${modelId.replace('wavespeed-ai/', '').split('/').join('-')}`;
+// The model's page on the site, where it can be tried in the playground.
+export function modelPlaygroundUrl(modelId: string): string {
+  return `https://wavespeed.ai/models/${modelId}`;
 }
 
 export interface ModelPrice {
