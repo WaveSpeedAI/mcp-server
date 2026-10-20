@@ -6,6 +6,7 @@ import {
   fetchHistory,
   fetchBillings,
   fetchUsageStats,
+  deletePredictions,
 } from './api.js';
 
 const ORIGINAL_ENV = process.env.WAVESPEED_CLIENT_NAME;
@@ -207,5 +208,12 @@ describe('history, billings and usage', () => {
     await fetchUsageStats('s', 'e', 'm1');
     expect(calls[0].url).toMatch(/\/api\/v3\/user\/usage_stats$/);
     expect(calls[0].body).toEqual({ start_time: 's', end_time: 'e', model_uuid: 'm1' });
+  });
+
+  it('delete posts the ids to the delete endpoint', async () => {
+    const calls = capture();
+    await deletePredictions(['p1', 'p2']);
+    expect(calls[0].url).toMatch(/\/api\/v3\/predictions\/delete$/);
+    expect(calls[0].body).toEqual({ ids: ['p1', 'p2'] });
   });
 });

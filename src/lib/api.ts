@@ -352,3 +352,8 @@ export async function waitForPrediction(
     await new Promise((r) => setTimeout(r, interval));
   }
 }
+
+// Deletes within the key's own organization; the response lists the ids actually deleted.
+export async function deletePredictions(ids: string[]): Promise<{ deleted_count?: number; deleted_ids?: string[] }> {
+  return apiPost('/api/v3/predictions/delete', { ids }, { timeoutMs: GET_TIMEOUT_MS });
+}

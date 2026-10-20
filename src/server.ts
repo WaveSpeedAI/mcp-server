@@ -22,6 +22,7 @@ import {
   fetchHistory,
   fetchBillings,
   fetchUsageStats,
+  deletePredictions,
   PREDICTION_STATUSES,
   fetchPricing,
   fetchPrediction,
@@ -33,6 +34,10 @@ import {
   type Prediction,
 } from './lib/api.js';
 import { getApiKey, getBaseUrl } from './lib/config.js';
+import { MAX_DELETE_IDS, prepareDelete, summarizeDelete } from './lib/delete-predictions.js';
+
+// Where to add credit; handed to the assistant next to the balance.
+const TOP_UP_URL = 'https://wavespeed.ai/top-up';
 import { resolveLocalFiles } from './lib/local-files.js';
 import { uploadWithCache } from './lib/upload-cache.js';
 import { missingPriceVars, isFloorQuote } from './lib/pricing-vars.js';
@@ -314,8 +319,8 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool('get_balance', 'Show the WaveSpeed account credit balance.', {}, { readOnlyHint: true, openWorldHint: true }, async () => {
-    return ok(await fetchBalance());
+  server.tool('get_balance', 'Show the WaveSpeed account credit balance, with the link to top up.', {}, { readOnlyHint: true, openWorldHint: true }, async () => {
+    return ok({ ...(await fetchBalance()), top_up_url: TOP_UP_URL });
   });
 
   server.tool(
@@ -385,6 +390,21 @@ export function createServer(): McpServer {
       const end = toIso(until, 'until') ?? new Date().toISOString();
       const start = toIso(since, 'since') ?? new Date(Date.parse(end) - 7 * 24 * 60 * 60 * 1000).toISOString();
       return ok(await fetchUsageStats(start, end, model));
+    },
+  );
+
+  server.tool(
+    'delete_predictions',
+    `Delete finished predictions from this account's run history, up to ${MAX_DELETE_IDS} at a time. They stop appearing in list_predictions and get_prediction, and this tool cannot bring them back. Runs that are still going are left alone, and only the key's own organization's records are deleted. Ask the user first, and pass confirm: true only after they agreed to delete these ids.`,
+    {
+      ids: z.array(z.string()).min(1).max(MAX_DELETE_IDS).describe('Prediction ids to delete'),
+      confirm: z.boolean().describe('Must be true: the user has agreed to delete these predictions'),
+    },
+    { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    async ({ ids, confirm }) => {
+      const toDelete = prepareDelete(ids, confirm);
+      const res = await deletePredictions(toDelete);
+      return ok(summarizeDelete(toDelete, res.deleted_ids));
     },
   );
 
