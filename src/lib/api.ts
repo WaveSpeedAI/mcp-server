@@ -256,9 +256,12 @@ export async function fetchUsageStats(startTime: string, endTime: string, model?
   return apiPost('/api/v3/user/usage_stats', body, { timeoutMs: GET_TIMEOUT_MS });
 }
 
-// The model page's markdown summary for agents (inputs, endpoint, examples).
-export function modelLlmsTxtUrl(modelId: string): string {
-  return `https://wavespeed.ai/models/${modelId}/llms.txt`;
+// The model's page on the docs site (same rule as the dashboard's model page
+// link): provider folder, then the id without a leading "wavespeed-ai/" and
+// with "/" turned into "-".
+export function modelDocsUrl(modelId: string): string {
+  const provider = modelId.split('/')[0];
+  return `https://wavespeed.ai/docs/docs-api/${provider}/${modelId.replace('wavespeed-ai/', '').split('/').join('-')}`;
 }
 
 export interface ModelPrice {

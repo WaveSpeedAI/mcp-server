@@ -7,7 +7,7 @@ import {
   fetchBillings,
   fetchUsageStats,
   deletePredictions,
-  modelLlmsTxtUrl,
+  modelDocsUrl,
 } from './api.js';
 
 const ORIGINAL_ENV = process.env.WAVESPEED_CLIENT_NAME;
@@ -219,10 +219,13 @@ describe('history, billings and usage', () => {
   });
 });
 
-describe('modelLlmsTxtUrl', () => {
-  it('points at the model page markdown, keeping every path segment', () => {
-    expect(modelLlmsTxtUrl('bytedance/seedance-2.5/image-to-video')).toBe(
-      'https://wavespeed.ai/models/bytedance/seedance-2.5/image-to-video/llms.txt',
+describe('modelDocsUrl', () => {
+  it('links the docs page, dropping the wavespeed-ai prefix and joining the rest with dashes', () => {
+    expect(modelDocsUrl('google/nano-banana-2.1/edit')).toBe(
+      'https://wavespeed.ai/docs/docs-api/google/google-nano-banana-2.1-edit',
+    );
+    expect(modelDocsUrl('wavespeed-ai/infinitetalk/multi')).toBe(
+      'https://wavespeed.ai/docs/docs-api/wavespeed-ai/infinitetalk-multi',
     );
   });
 });
