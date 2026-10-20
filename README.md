@@ -36,6 +36,9 @@ Built on the same design as the open-source [`@wavespeed/cli`](https://github.co
 | `run_model` | Submit + wait; rejects input keys the model doesn't accept; `@path` inputs upload automatically; returns output URLs |
 | `get_price` | Cost estimate with `unpriced_inputs` / `at_base_price` disclosure |
 | `get_balance` | Account credit balance |
+| `list_predictions` | Run history (default last 24h); filter by model, status, time range |
+| `list_billings` | Itemized charges and refunds (needs a Billing-access key) |
+| `get_usage` | Spend, request counts and per-model breakdown (default last 7 days; needs a Billing-access key) |
 | `upload_file` | Local file → hosted URL (24h content-hash dedupe) |
 | `get_prediction` | Status/outputs of any run by id; optional `wait_seconds` to wait for it |
 

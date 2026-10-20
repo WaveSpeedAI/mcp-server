@@ -1,5 +1,12 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { clientAttributionHeaders, waitForPrediction, submitPrediction } from './api.js';
+import {
+  clientAttributionHeaders,
+  waitForPrediction,
+  submitPrediction,
+  fetchHistory,
+  fetchBillings,
+  fetchUsageStats,
+} from './api.js';
 
 const ORIGINAL_ENV = process.env.WAVESPEED_CLIENT_NAME;
 
@@ -150,5 +157,55 @@ describe('per-request timeouts', () => {
     globalThis.fetch = fn as unknown as typeof fetch;
     await expect(submitPrediction('m/x', {})).rejects.toThrow(/outcome unknown.*may have been created/);
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('history, billings and usage', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.unstubAllEnvs();
+  });
+
+  function capture() {
+    vi.stubEnv('WAVESPEED_API_KEY', 'test');
+    const calls: { url: string; body: any }[] = [];
+    globalThis.fetch = vi.fn(async (url: any, init: any) => {
+      calls.push({ url: String(url), body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ code: 200, data: { page: 1, items: [] } }));
+    }) as typeof fetch;
+    return calls;
+  }
+
+  it('history defaults to a 24h window and sends only the given filters', async () => {
+    const calls = capture();
+    await fetchHistory({ status: 'failed', pageSize: 5 });
+    expect(calls[0].url).toMatch(/\/api\/v3\/predictions$/);
+    const b = calls[0].body;
+    expect(b).toMatchObject({ page: 1, page_size: 5, status: 'failed' });
+    expect(b.model).toBeUndefined();
+    expect(Date.parse(b.created_before) - Date.parse(b.created_after)).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it('billings maps filters to the v3 field names', async () => {
+    const calls = capture();
+    await fetchBillings({ type: 'refund', model: 'm1', accessKey: 'k1', startTime: 's', endTime: 'e' });
+    expect(calls[0].url).toMatch(/\/api\/v3\/billings\/search$/);
+    expect(calls[0].body).toEqual({
+      page: 1,
+      page_size: 20,
+      billing_type: 'refund',
+      model_uuid: 'm1',
+      access_key_uuid: 'k1',
+      start_time: 's',
+      end_time: 'e',
+    });
+  });
+
+  it('usage posts the window and optional model', async () => {
+    const calls = capture();
+    await fetchUsageStats('s', 'e', 'm1');
+    expect(calls[0].url).toMatch(/\/api\/v3\/user\/usage_stats$/);
+    expect(calls[0].body).toEqual({ start_time: 's', end_time: 'e', model_uuid: 'm1' });
   });
 });

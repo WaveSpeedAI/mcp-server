@@ -19,6 +19,10 @@ import { Client } from 'wavespeed';
 import {
   fetchModels,
   fetchBalance,
+  fetchHistory,
+  fetchBillings,
+  fetchUsageStats,
+  PREDICTION_STATUSES,
   fetchPricing,
   fetchPrediction,
   submitPrediction,
@@ -36,6 +40,13 @@ import { findUnknownInputs } from './lib/validate-inputs.js';
 
 const require = createRequire(import.meta.url);
 const { version: PKG_VERSION } = require('../package.json') as { version: string };
+
+function toIso(value: string | undefined, name: string): string | undefined {
+  if (!value) return undefined;
+  const t = Date.parse(value);
+  if (Number.isNaN(t)) throw new Error(`Invalid ${name} "${value}": use ISO 8601 or YYYY-MM-DD.`);
+  return new Date(t).toISOString();
+}
 
 const PRICE_DISCLAIMER =
   'Estimate only, for reference — the amount actually charged for a run is authoritative.';
@@ -306,6 +317,76 @@ export function createServer(): McpServer {
   server.tool('get_balance', 'Show the WaveSpeed account credit balance.', {}, { readOnlyHint: true, openWorldHint: true }, async () => {
     return ok(await fetchBalance());
   });
+
+  server.tool(
+    'list_predictions',
+    'List past predictions (run history), newest window first. Defaults to the last 24 hours; pass since/until (ISO or YYYY-MM-DD) for other ranges. Use get_prediction with an id for one task in full.',
+    {
+      page: z.number().int().min(1).default(1),
+      limit: z.number().int().min(1).max(100).default(20).describe('Page size'),
+      model: z.string().optional().describe('Filter by model ID'),
+      status: z.enum(PREDICTION_STATUSES as [string, ...string[]]).optional(),
+      since: z.string().optional().describe('Created after this time (ISO or YYYY-MM-DD)'),
+      until: z.string().optional().describe('Created before this time (ISO or YYYY-MM-DD)'),
+    },
+    { readOnlyHint: true, openWorldHint: true },
+    async ({ page, limit, model, status, since, until }) => {
+      return ok(
+        await fetchHistory({
+          page,
+          pageSize: limit,
+          model,
+          status,
+          createdAfter: toIso(since, 'since'),
+          createdBefore: toIso(until, 'until'),
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'list_billings',
+    'List itemized charges and refunds (billing records). Requires an API key with Billing access.',
+    {
+      page: z.number().int().min(1).default(1),
+      limit: z.number().int().min(1).max(100).default(20).describe('Page size'),
+      type: z.enum(['deduct', 'refund']).optional(),
+      model: z.string().optional().describe('Filter by model uuid'),
+      key: z.string().optional().describe('Filter by the API key uuid that generated the charge'),
+      since: z.string().optional().describe('Records after this time (ISO or YYYY-MM-DD)'),
+      until: z.string().optional().describe('Records before this time (ISO or YYYY-MM-DD)'),
+    },
+    { readOnlyHint: true, openWorldHint: true },
+    async ({ page, limit, type, model, key, since, until }) => {
+      return ok(
+        await fetchBillings({
+          page,
+          pageSize: limit,
+          type,
+          model,
+          accessKey: key,
+          startTime: toIso(since, 'since'),
+          endTime: toIso(until, 'until'),
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    'get_usage',
+    'Usage statistics: spend, request counts, daily series and per-model breakdown. Defaults to the last 7 days. Requires an API key with Billing access.',
+    {
+      since: z.string().optional().describe('Start (ISO or YYYY-MM-DD); default 7 days ago'),
+      until: z.string().optional().describe('End (ISO or YYYY-MM-DD); default now'),
+      model: z.string().optional().describe('Filter by model uuid'),
+    },
+    { readOnlyHint: true, openWorldHint: true },
+    async ({ since, until, model }) => {
+      const end = toIso(until, 'until') ?? new Date().toISOString();
+      const start = toIso(since, 'since') ?? new Date(Date.parse(end) - 7 * 24 * 60 * 60 * 1000).toISOString();
+      return ok(await fetchUsageStats(start, end, model));
+    },
+  );
 
   server.tool(
     'upload_file',

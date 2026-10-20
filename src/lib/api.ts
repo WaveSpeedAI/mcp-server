@@ -208,6 +208,54 @@ export async function fetchBalance(): Promise<{ balance: number }> {
   return apiGet<{ balance: number }>('/api/v3/balance');
 }
 
+export interface HistoryItem {
+  id: string;
+  model: string;
+  status: string;
+  outputs?: (string | Record<string, unknown>)[];
+  created_at: string;
+  executionTime?: number;
+  error?: string;
+}
+
+export const PREDICTION_STATUSES = ['created', 'processing', 'completed', 'failed', 'cancelled', 'timeout', 'deleted'];
+
+// Same contract as wavespeed-cli `history`: the endpoint needs a time window,
+// so default to the last 24 hours.
+export async function fetchHistory(
+  query: { page?: number; pageSize?: number; model?: string; status?: string; createdAfter?: string; createdBefore?: string } = {},
+): Promise<{ page: number; items: HistoryItem[] }> {
+  const now = new Date();
+  const body: Record<string, unknown> = {
+    page: query.page ?? 1,
+    page_size: query.pageSize ?? 20,
+    created_after: query.createdAfter ?? new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    created_before: query.createdBefore ?? now.toISOString(),
+  };
+  if (query.model) body.model = query.model;
+  if (query.status) body.status = query.status;
+  return apiPost('/api/v3/predictions', body, { timeoutMs: GET_TIMEOUT_MS });
+}
+
+// Needs a key with Billing access; otherwise the platform's own error is surfaced.
+export async function fetchBillings(
+  query: { page?: number; pageSize?: number; type?: string; startTime?: string; endTime?: string; model?: string; accessKey?: string } = {},
+): Promise<{ page: number; has_more: boolean; items: unknown[] }> {
+  const body: Record<string, unknown> = { page: query.page ?? 1, page_size: query.pageSize ?? 20 };
+  if (query.type) body.billing_type = query.type;
+  if (query.startTime) body.start_time = query.startTime;
+  if (query.endTime) body.end_time = query.endTime;
+  if (query.model) body.model_uuid = query.model;
+  if (query.accessKey) body.access_key_uuid = query.accessKey;
+  return apiPost('/api/v3/billings/search', body, { timeoutMs: GET_TIMEOUT_MS });
+}
+
+export async function fetchUsageStats(startTime: string, endTime: string, model?: string): Promise<unknown> {
+  const body: Record<string, unknown> = { start_time: startTime, end_time: endTime };
+  if (model) body.model_uuid = model;
+  return apiPost('/api/v3/user/usage_stats', body, { timeoutMs: GET_TIMEOUT_MS });
+}
+
 export interface ModelPrice {
   model_id: string;
   price: number;
