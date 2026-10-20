@@ -9,8 +9,8 @@
 // * Inputs are never mutated. The one explicit transform is the `@path`
 //   marker, which uploads the referenced local file and substitutes its
 //   hosted URL. Bare paths pass through untouched.
-// * Price quotes name the inputs they were blind to instead of presenting
-//   the formula's floor as "the" price.
+// * Price quotes are estimates for the inputs given; the model's llms.txt
+//   is linked next to them for what each input means.
 
 import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -25,6 +25,7 @@ import {
   deletePredictions,
   PREDICTION_STATUSES,
   fetchPricing,
+  modelLlmsTxtUrl,
   fetchPrediction,
   submitPrediction,
   waitForPrediction,
@@ -40,7 +41,6 @@ import { MAX_DELETE_IDS, prepareDelete, summarizeDelete } from './lib/delete-pre
 const TOP_UP_URL = 'https://wavespeed.ai/top-up';
 import { resolveLocalFiles } from './lib/local-files.js';
 import { uploadWithCache } from './lib/upload-cache.js';
-import { missingPriceVars, isFloorQuote } from './lib/pricing-vars.js';
 import { findUnknownInputs } from './lib/validate-inputs.js';
 
 const require = createRequire(import.meta.url);
@@ -217,6 +217,7 @@ export function createServer(): McpServer {
         required: schema?.required ?? [],
         properties: schema?.properties ?? {},
         property_order: schema?.['x-order-properties'] ?? [],
+        llms_txt: modelLlmsTxtUrl(meta.model_id),
       });
     },
   );
@@ -276,46 +277,23 @@ export function createServer(): McpServer {
 
   server.tool(
     'get_price',
-    'Estimate the cost of a run before executing it (no charge). Provide the same input you would pass to run_model — pricing often depends on inputs like duration or resolution.',
+    'Estimate the cost of a run before executing it (no charge). Provide the same input you would pass to run_model — pricing often depends on inputs like duration or resolution, and a quote made without them can be lower than the real charge.',
     {
       model: z.string().describe('Model ID from list_models'),
       input: z.record(z.unknown()).default({}).describe('Inputs the quote should account for'),
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async ({ model, input }) => {
-      // Resolve @path markers exactly like run_model: pricing formulas often
-      // read the file itself (get_duration_v3(audio)), so quoting with the
-      // literal "@./a.mp3" string would silently collapse to the floor. The
-      // 24h content-hash cache means the later run reuses this upload.
+      // Resolve @path markers exactly like run_model: some prices are measured
+      // from the file itself, so quoting with the literal "@./a.mp3" string
+      // would be wrong. The 24h content-hash cache means the later run reuses
+      // this upload.
       const resolved = await resolveLocalFiles(input as Record<string, unknown>, {
         upload: async (p) => (await uploadFile(p)).url,
       });
       const priceInput = resolved.input;
       const data = await fetchPricing(model, priceInput);
-      // The pricing endpoint accepts partial inputs without complaint — a
-      // formula whose variables are all missing collapses to base_price, the
-      // floor of the model's range. Name what the quote could not see.
-      let unpriced: string[] = [];
-      let atFloor = false;
-      try {
-        const models = await fetchModels();
-        const meta = models.find((m) => m.model_id === model);
-        unpriced = missingPriceVars(
-          meta?.formula,
-          priceInput,
-          requestSchema(meta ?? ({} as LiveModel))?.properties,
-        );
-        atFloor = isFloorQuote(meta?.formula, priceInput);
-      } catch {
-        /* no catalog — the generic disclaimer still applies */
-      }
-      return ok({
-        ...data,
-        estimate: true,
-        unpriced_inputs: unpriced,
-        at_base_price: atFloor,
-        disclaimer: PRICE_DISCLAIMER,
-      });
+      return ok({ ...data, estimate: true, disclaimer: PRICE_DISCLAIMER, llms_txt: modelLlmsTxtUrl(model) });
     },
   );
 

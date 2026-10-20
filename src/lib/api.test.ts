@@ -7,6 +7,7 @@ import {
   fetchBillings,
   fetchUsageStats,
   deletePredictions,
+  modelLlmsTxtUrl,
 } from './api.js';
 
 const ORIGINAL_ENV = process.env.WAVESPEED_CLIENT_NAME;
@@ -215,5 +216,13 @@ describe('history, billings and usage', () => {
     await deletePredictions(['p1', 'p2']);
     expect(calls[0].url).toMatch(/\/api\/v3\/predictions\/delete$/);
     expect(calls[0].body).toEqual({ ids: ['p1', 'p2'] });
+  });
+});
+
+describe('modelLlmsTxtUrl', () => {
+  it('points at the model page markdown, keeping every path segment', () => {
+    expect(modelLlmsTxtUrl('bytedance/seedance-2.5/image-to-video')).toBe(
+      'https://wavespeed.ai/models/bytedance/seedance-2.5/image-to-video/llms.txt',
+    );
   });
 });

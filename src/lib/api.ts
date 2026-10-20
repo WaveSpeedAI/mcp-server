@@ -256,6 +256,11 @@ export async function fetchUsageStats(startTime: string, endTime: string, model?
   return apiPost('/api/v3/user/usage_stats', body, { timeoutMs: GET_TIMEOUT_MS });
 }
 
+// The model page's markdown summary for agents (inputs, endpoint, examples).
+export function modelLlmsTxtUrl(modelId: string): string {
+  return `https://wavespeed.ai/models/${modelId}/llms.txt`;
+}
+
 export interface ModelPrice {
   model_id: string;
   price: number;

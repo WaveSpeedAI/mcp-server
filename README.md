@@ -25,16 +25,16 @@ Built on the same design as the open-source [`@wavespeed/cli`](https://github.co
 - **No hardcoded models.** The catalog comes from the live API (1h cache); new platform models work the day they ship.
 - **One generation verb.** `run_model` executes anything; `get_model_schema` tells the agent what inputs a model actually accepts, so it reads before it writes.
 - **Inputs are never mutated.** The one explicit transform is the `@path` marker — a `"@./photo.jpg"` value inside `input` uploads the file and substitutes its hosted URL. Bare paths are passed through untouched.
-- **Honest pricing.** `get_price` quotes before you spend and names the inputs the quote was blind to (`unpriced_inputs`) instead of presenting a formula's floor as "the" price.
+- **Quote before you spend.** `get_price` takes the same input as `run_model` and returns an estimate; the amount actually charged for a run is authoritative.
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
 | `list_models` | Search the live catalog by text or modality type |
-| `get_model_schema` | A model's real input schema (required, properties, defaults) |
+| `get_model_schema` | A model's real input schema (required, properties, defaults), with a link to the model's `llms.txt` |
 | `run_model` | Submit + wait; rejects input keys the model doesn't accept; `@path` inputs upload automatically; returns output URLs |
-| `get_price` | Cost estimate with `unpriced_inputs` / `at_base_price` disclosure |
+| `get_price` | Cost estimate for the inputs you pass (no charge), with a link to the model's `llms.txt` |
 | `get_balance` | Account credit balance, with the top-up link |
 | `list_predictions` | Run history (default last 24h); filter by model, status, time range |
 | `list_billings` | Itemized charges and refunds (needs a Billing-access key) |
