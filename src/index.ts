@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// stdio entry point: `wavespeed-mcp` (or `npx -y @wavespeed/mcp`).
+// stdio entry point: `wavespeed-mcp` (or `npx -y @wavespeed/mcp@latest`).
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createServer } from './server.js';

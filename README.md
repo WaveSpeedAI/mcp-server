@@ -71,12 +71,14 @@ The hosted server has the same tools, with one difference for files: it cannot r
 
 ### Local (npx)
 
+`@latest` makes npx fetch the newest release on each start; without it, npx runs a globally installed `@wavespeed/mcp` if one exists, however old.
+
 Auth resolves from `WAVESPEED_API_KEY`, or from the CLI's stored login (`wavespeed login`) — one login covers both tools. Keys: [wavespeed.ai/accesskey](https://wavespeed.ai/accesskey).
 
 **Claude Code**
 
 ```bash
-claude mcp add wavespeed -- npx -y @wavespeed/mcp
+claude mcp add wavespeed -- npx -y @wavespeed/mcp@latest
 ```
 
 **Claude Desktop / other clients** (`mcpServers` config):
@@ -86,7 +88,7 @@ claude mcp add wavespeed -- npx -y @wavespeed/mcp
   "mcpServers": {
     "wavespeed": {
       "command": "npx",
-      "args": ["-y", "@wavespeed/mcp"],
+      "args": ["-y", "@wavespeed/mcp@latest"],
       "env": { "WAVESPEED_API_KEY": "wsk_..." }
     }
   }

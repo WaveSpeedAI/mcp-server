@@ -4,7 +4,7 @@
     "wavespeed": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@wavespeed/mcp"],
+      "args": ["-y", "@wavespeed/mcp@latest"],
       "env": {
         "WAVESPEED_API_KEY": "${WAVESPEED_API_KEY}"
       }

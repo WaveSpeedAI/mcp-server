@@ -3,7 +3,7 @@
 One command, no build step:
 
 ```bash
-npx -y @wavespeed/mcp
+npx -y @wavespeed/mcp@latest
 ```
 
 MCP client config (Cline / Claude Desktop / any `mcpServers` consumer):
@@ -13,7 +13,7 @@ MCP client config (Cline / Claude Desktop / any `mcpServers` consumer):
   "mcpServers": {
     "wavespeed": {
       "command": "npx",
-      "args": ["-y", "@wavespeed/mcp"],
+      "args": ["-y", "@wavespeed/mcp@latest"],
       "env": { "WAVESPEED_API_KEY": "<key from https://wavespeed.ai/accesskey>" }
     }
   }
