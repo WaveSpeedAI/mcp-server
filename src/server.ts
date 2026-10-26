@@ -1,11 +1,14 @@
 // WaveSpeed MCP server — tools mirror the wavespeed CLI's verbs.
 //
 // Design (shared with wavespeed-cli):
-// * The live /api/v3/models catalog is the only model source. There is no
-//   bundled model list and no hardcoded per-model tool — new platform models
-//   work the day they ship.
+// * The live /api/v3/models catalog is the only model source for `run_model`:
+//   no hardcoded per-model tool, so new platform models work the day they ship.
 // * One generation verb (`run_model`), driven by per-model schemas exposed
 //   through `get_model_schema`.
+// * Five shortcut verbs (generate_image, edit_image, generate_video,
+//   edit_video, extend_video) pick the endpoint and fit the input for the
+//   models the WaveSpeed /chat page offers (lib/media-models.ts). They submit
+//   through the same path as `run_model`.
 // * Inputs are never mutated. The one explicit transform is the `@path`
 //   marker, which uploads the referenced local file and substitutes its
 //   hosted URL. Bare paths pass through untouched.
@@ -42,6 +45,8 @@ const TOP_UP_URL = 'https://wavespeed.ai/top-up';
 import { resolveLocalFiles } from './lib/local-files.js';
 import { uploadWithCache } from './lib/upload-cache.js';
 import { findUnknownInputs } from './lib/validate-inputs.js';
+import { IMAGE_MODEL_KEYS, VIDEO_MODEL_KEYS } from './lib/media-models.js';
+import { planImage, planVideo, type MediaPlan, type Prop } from './lib/media-plan.js';
 
 const require = createRequire(import.meta.url);
 const { version: PKG_VERSION } = require('../package.json') as { version: string };
@@ -145,6 +150,50 @@ async function assertKnownInputs(model: string, input: Record<string, unknown>):
   );
 }
 
+// Input properties of an endpoint from the live catalog, for fitting a
+// request to what the model accepts. Null when the catalog has no schema.
+async function catalogProps(modelId: string): Promise<Record<string, Prop> | null> {
+  const model = (await fetchModels()).find((m) => m.model_id === modelId);
+  const props = model && requestSchema(model)?.properties;
+  return props ? (props as Record<string, Prop>) : null;
+}
+
+// Wait for a submitted prediction up to wait_seconds and report it. Shared by
+// run_model and the shortcut verbs so a run reads the same whichever started it.
+async function reportPrediction(
+  submitted: { id: string; status: string },
+  model: string,
+  waitSeconds: number,
+  extra: ToolExtra,
+  started: number,
+  // always: in every reply; waited: only when the call waited for the result.
+  more: { always?: Record<string, unknown>; waited?: Record<string, unknown> } = {},
+) {
+  if (waitSeconds === 0) {
+    return ok({ id: submitted.id, status: submitted.status, model, done: false, ...more.always, next: STILL_RUNNING_HINT });
+  }
+  const { item, done } = await waitForPrediction(submitted.id, {
+    intervalMs: POLL_INTERVAL_MS,
+    timeoutMs: waitSeconds * 1000,
+    onTick: progressTicker(extra, submitted.id, started),
+    signal: extra.signal,
+  });
+  if (TERMINAL_FAILURES.includes(item.status)) {
+    throw new Error(`Prediction ${item.status}${item.error ? `: ${item.error}` : ''} (task_id: ${submitted.id})`);
+  }
+  return ok({
+    id: submitted.id,
+    model,
+    status: item.status,
+    done,
+    outputs: item.outputs ?? [],
+    elapsed_ms: Date.now() - started,
+    ...more.waited,
+    ...more.always,
+    ...(done ? {} : { next: STILL_RUNNING_HINT }),
+  });
+}
+
 function ok(payload: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
 }
@@ -159,6 +208,10 @@ export function createServer(): McpServer {
         'inputs, run_model to execute. Reference local files as "@./path"',
         'values inside input — they upload automatically; bare paths are',
         'passed through untouched and will fail model validation.',
+        'For plain image or video generation, generate_image, edit_image,',
+        'generate_video, edit_video and extend_video pick the model and inputs',
+        'for you (the models of the WaveSpeed chat page); pass estimate_only to',
+        'get the price without running.',
         'Use get_price before expensive runs. Never invent model IDs or input keys.',
         'Long generations (video, some audio/3D) can run for hours: when',
         'run_model returns done=false, keep the id and poll get_prediction.',
@@ -248,30 +301,181 @@ export function createServer(): McpServer {
       await assertKnownInputs(model, resolved.input);
       const started = Date.now();
       const submitted = await submitPrediction(model, resolved.input);
-      if (wait_seconds === 0) {
-        return ok({ id: submitted.id, status: submitted.status, model, done: false, next: STILL_RUNNING_HINT });
-      }
-      const { item, done } = await waitForPrediction(submitted.id, {
-        intervalMs: POLL_INTERVAL_MS,
-        timeoutMs: wait_seconds * 1000,
-        onTick: progressTicker(extra, submitted.id, started),
-        signal: extra.signal,
-      });
-      if (TERMINAL_FAILURES.includes(item.status)) {
-        throw new Error(
-          `Prediction ${item.status}${item.error ? `: ${item.error}` : ''} (task_id: ${submitted.id})`,
-        );
-      }
+      return reportPrediction(submitted, model, wait_seconds, extra, started, { waited: { uploaded_files: resolved.uploaded } });
+    },
+  );
+
+  // ---- Shortcut verbs: the models the /chat page offers, endpoint and input
+  // chosen and fitted for the caller (see lib/media-plan.ts). They submit and
+  // wait exactly like run_model, and estimate_only quotes without running.
+  const waitSchema = z
+    .number()
+    .int()
+    .min(0)
+    .max(1800)
+    .default(DEFAULT_WAIT_SECONDS)
+    .describe(`Max seconds to wait for the result in this call (default ${DEFAULT_WAIT_SECONDS}: return the prediction id right away)`);
+  const estimateSchema = z
+    .boolean()
+    .default(false)
+    .describe('true: only return the price estimate and the request that would run. Nothing is submitted or charged.');
+  const mediaList = (what: string) =>
+    z.array(z.string()).describe(`${what}: public URLs, or "@./path" for local files (uploaded automatically).`);
+  const REFS =
+    'In the prompt, name input media as @image 1, @image 2, @video 1, @audio 1 (counted in the order the lists are given); they are renamed to what the model expects.';
+  const shortcutAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
+
+  async function runPlan(plan: MediaPlan, opts: { estimate_only: boolean; wait_seconds: number }, extra: ToolExtra, uploaded: number) {
+    let estimate: unknown = null;
+    let estimateError: string | undefined;
+    try {
+      estimate = await fetchPricing(plan.modelId, plan.input);
+    } catch (err: any) {
+      estimateError = err?.message ?? String(err);
+    }
+    const summary = {
+      model_label: plan.label,
+      mode: plan.mode,
+      estimate,
+      ...(estimateError ? { estimate_error: estimateError } : {}),
+      ...(plan.notes.length ? { notes: plan.notes } : {}),
+    };
+    if (opts.estimate_only) {
       return ok({
-        id: submitted.id,
-        model,
-        status: item.status,
-        done,
-        outputs: item.outputs ?? [],
-        elapsed_ms: Date.now() - started,
-        uploaded_files: resolved.uploaded,
-        ...(done ? {} : { next: STILL_RUNNING_HINT }),
+        estimate_only: true,
+        model: plan.modelId,
+        input: plan.input,
+        ...summary,
+        disclaimer: PRICE_DISCLAIMER,
+        playground_url: modelPlaygroundUrl(plan.modelId),
       });
+    }
+    const started = Date.now();
+    const submitted = await submitPrediction(plan.modelId, plan.input);
+    return reportPrediction(submitted, plan.modelId, opts.wait_seconds, extra, started, {
+      always: summary,
+      waited: { uploaded_files: uploaded },
+    });
+  }
+
+  // Replace @path values in the media arguments with hosted URLs. The prompt is
+  // not scanned: a prompt that starts with "@image 1" is not a file.
+  async function withUploads<T extends object>(args: T, keys: string[]): Promise<{ args: T; uploaded: number }> {
+    const media: Record<string, unknown> = {};
+    for (const k of keys) if ((args as Record<string, unknown>)[k] !== undefined) media[k] = (args as Record<string, unknown>)[k];
+    const resolved = await resolveLocalFiles(media, { upload: async (p) => (await uploadFile(p)).url });
+    return { args: { ...args, ...resolved.input }, uploaded: resolved.uploaded };
+  }
+
+  const imageShape = {
+    prompt: z.string().min(1).describe('Complete visual prompt: subject, composition, style, lighting, mood.'),
+    model: z.enum(IMAGE_MODEL_KEYS as [string, ...string[]]).optional().describe('Only when the user names a model; default is the first (Seedream 5 Pro).'),
+    aspect_ratio: z.string().optional().describe('e.g. 1:1, 16:9, 9:16, 4:3, 3:4; snapped to what the model supports.'),
+    resolution: z.enum(['1k', '2k', '4k']).optional().describe('Only when the user asks for a size.'),
+    wait_seconds: waitSchema,
+    estimate_only: estimateSchema,
+  };
+  const IMAGE_KEYS = ['images', 'reference_images'];
+
+  server.tool(
+    'generate_image',
+    `Create an image from a text description with the same models as the WaveSpeed /chat page (${IMAGE_MODEL_KEYS.join(', ')}; default ${IMAGE_MODEL_KEYS[0]}). Give reference_images to use existing images as subject, product, face or style (the model's edit endpoint is used). To change existing images use edit_image. ${REFS}`,
+    { ...imageShape, reference_images: mediaList('Optional images whose subject, product, face or style the new image should use').optional() },
+    shortcutAnnotations,
+    async (raw, extra) => {
+      const { args, uploaded } = await withUploads(raw, IMAGE_KEYS);
+      const plan = await planImage(args, catalogProps);
+      return runPlan(plan, { estimate_only: raw.estimate_only, wait_seconds: raw.wait_seconds }, extra, uploaded);
+    },
+  );
+
+  server.tool(
+    'edit_image',
+    `Change existing images with the same models as the WaveSpeed /chat page: edits, restyles, backgrounds, adding or removing things, combining several images. ${REFS}`,
+    { ...imageShape, images: mediaList('The images to edit, in order').min(1) },
+    shortcutAnnotations,
+    async (raw, extra) => {
+      const { args, uploaded } = await withUploads(raw, IMAGE_KEYS);
+      const plan = await planImage(args, catalogProps);
+      return runPlan(plan, { estimate_only: raw.estimate_only, wait_seconds: raw.wait_seconds }, extra, uploaded);
+    },
+  );
+
+  const videoModelSchema = z
+    .enum(VIDEO_MODEL_KEYS as [string, ...string[]])
+    .optional()
+    .describe(`Only when the user names a model (${VIDEO_MODEL_KEYS.join(', ')}). Without it the default (${VIDEO_MODEL_KEYS[0]}) is used, and another model only when it cannot take the inputs.`);
+  const resolutionSchema = z
+    .enum(['480p', '540p', '720p', '768p', '1080p'])
+    .optional()
+    .describe('Only when the user asks for a resolution, or 480p for a cheaper draft; otherwise omit. MiniMax H3 defaults to 768p (its equivalent of 720p).');
+  const durationSchema = z.number().int().optional().describe('Seconds, only when the user asks for a length; omit to use the model default.');
+  const VIDEO_KEYS = ['first_frame', 'last_frame', 'reference_images', 'reference_videos', 'reference_audios', 'video'];
+
+  server.tool(
+    'generate_video',
+    `Create a video with the same models as the WaveSpeed /chat page (default ${VIDEO_MODEL_KEYS[0]}). Give first_frame to animate an image; give reference_images / reference_videos / reference_audios to keep characters, products, motion, voice or music. The right mode (text, image or reference to video) is picked from what you give. Videos can cost dollars: use estimate_only first when unsure. ${REFS}`,
+    {
+      prompt: z.string().min(1).describe('Shot description: subject, action, camera movement, style, sound.'),
+      model: videoModelSchema,
+      first_frame: z.string().optional().describe('Image to start the video from (URL or "@./path").'),
+      last_frame: z.string().optional().describe('Optional image to end on (needs first_frame).'),
+      reference_images: mediaList('Optional images for characters, products or style to keep (not a first frame)').optional(),
+      reference_videos: mediaList('Optional videos for motion, camera or a character to follow').optional(),
+      reference_audios: mediaList('Optional audio for voice, music or sound to use').optional(),
+      duration: durationSchema,
+      resolution: resolutionSchema,
+      aspect_ratio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']).optional(),
+      wait_seconds: waitSchema,
+      estimate_only: estimateSchema,
+    },
+    shortcutAnnotations,
+    async (raw, extra) => {
+      const { args, uploaded } = await withUploads(raw, VIDEO_KEYS);
+      const plan = await planVideo(args, 'generate', catalogProps);
+      return runPlan(plan, { estimate_only: raw.estimate_only, wait_seconds: raw.wait_seconds }, extra, uploaded);
+    },
+  );
+
+  server.tool(
+    'edit_video',
+    `Edit an existing video with the same models as the WaveSpeed /chat page. Name the video and any references in the prompt (e.g. "replace the cat in @video 1 with the lion from @image 1"). ${REFS}`,
+    {
+      prompt: z.string().min(1).describe('What to change in the video and what must stay.'),
+      video: z.string().describe('The video to edit (URL or "@./path").'),
+      reference_images: mediaList('Optional images to use as references').optional(),
+      reference_audios: mediaList('Optional audio for voice, music or sound').optional(),
+      model: videoModelSchema,
+      resolution: resolutionSchema,
+      wait_seconds: waitSchema,
+      estimate_only: estimateSchema,
+    },
+    shortcutAnnotations,
+    async (raw, extra) => {
+      const { args, uploaded } = await withUploads(raw, VIDEO_KEYS);
+      const plan = await planVideo(args, 'edit', catalogProps);
+      return runPlan(plan, { estimate_only: raw.estimate_only, wait_seconds: raw.wait_seconds }, extra, uploaded);
+    },
+  );
+
+  server.tool(
+    'extend_video',
+    `Continue an existing video with new footage after its end, with the same models as the WaveSpeed /chat page. Turbo models cannot extend. ${REFS}`,
+    {
+      prompt: z.string().min(1).describe('What happens next.'),
+      video: z.string().describe('The video to continue (URL or "@./path").'),
+      last_frame: z.string().optional().describe('Optional image the continuation should end on.'),
+      duration: durationSchema.describe('Seconds of new footage; omit to use the model default.'),
+      model: videoModelSchema,
+      resolution: resolutionSchema,
+      wait_seconds: waitSchema,
+      estimate_only: estimateSchema,
+    },
+    shortcutAnnotations,
+    async (raw, extra) => {
+      const { args, uploaded } = await withUploads(raw, VIDEO_KEYS);
+      const plan = await planVideo(args, 'extend', catalogProps);
+      return runPlan(plan, { estimate_only: raw.estimate_only, wait_seconds: raw.wait_seconds }, extra, uploaded);
     },
   );
 

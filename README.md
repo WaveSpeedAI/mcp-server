@@ -22,9 +22,9 @@ An MCP server for the [WaveSpeed](https://wavespeed.ai) platform: run any model 
 
 Built on the same design as the open-source [`@wavespeed/cli`](https://github.com/WaveSpeedAI/wavespeed-cli):
 
-- **No hardcoded models.** The catalog comes from the live API (1h cache); new platform models work the day they ship.
-- **One generation verb.** `run_model` executes anything; `get_model_schema` tells the agent what inputs a model actually accepts, so it reads before it writes.
-- **Inputs are never mutated.** The one explicit transform is the `@path` marker — a `"@./photo.jpg"` value inside `input` uploads the file and substitutes its hosted URL. Bare paths are passed through untouched.
+- **No hardcoded models for `run_model`.** The catalog comes from the live API (1h cache); new platform models work the day they ship.
+- **One general verb, five shortcuts.** `run_model` executes anything; `get_model_schema` tells the agent what inputs a model actually accepts, so it reads before it writes. `generate_image`, `edit_image`, `generate_video`, `edit_video` and `extend_video` skip that: they use the same models as the [WaveSpeed /chat](https://wavespeed.ai/chat) page, pick the endpoint for what you give them and fit the request to its live schema.
+- **Inputs are never mutated.** The one explicit transform is the `@path` marker — a `"@./photo.jpg"` value inside `input` uploads the file and substitutes its hosted URL. Bare paths are passed through untouched. The shortcut tools (`generate_image` etc.) are the exception: they pick the endpoint and fit the request to the model, and report what they changed in `notes`.
 - **Quote before you spend.** `get_price` takes the same input as `run_model` and returns an estimate; the amount actually charged for a run is authoritative.
 
 ## Tools
@@ -34,6 +34,11 @@ Built on the same design as the open-source [`@wavespeed/cli`](https://github.co
 | `list_models` | Search the live catalog by text or modality type |
 | `get_model_schema` | A model's real input schema (required, properties, defaults), with a link to the model's playground page |
 | `run_model` | Submit + wait; rejects input keys the model doesn't accept; `@path` inputs upload automatically; returns output URLs |
+| `generate_image` | Image from a prompt with the /chat image models (default Seedream 5 Pro); reference images use the model's edit endpoint |
+| `edit_image` | Edit, restyle or combine existing images with the same models |
+| `generate_video` | Video from a prompt, a first/last frame or reference images/videos/audio, with the /chat video models (default Seedance 2.5); the mode (text, image, reference) is picked from the inputs |
+| `edit_video` | Edit an existing video, optionally with reference images/audio |
+| `extend_video` | Continue an existing video with new footage |
 | `get_price` | Cost estimate for the inputs you pass (no charge), with a link to the model's playground page |
 | `get_balance` | Account credit balance, with the top-up link |
 | `list_predictions` | Run history (default last 24h); filter by model, status, time range |
@@ -42,6 +47,8 @@ Built on the same design as the open-source [`@wavespeed/cli`](https://github.co
 | `delete_predictions` | Delete finished runs from the history (up to 100; needs `confirm: true`, cannot be undone from here) |
 | `upload_file` | Local file → hosted URL (24h content-hash dedupe) |
 | `get_prediction` | Status/outputs of any run by id; optional `wait_seconds` to wait for it |
+
+The five shortcut tools take `wait_seconds` like `run_model`, and `estimate_only: true` returns the price and the exact request that would run without submitting or charging anything. In their prompts, media is named `@image 1`, `@video 1`, `@audio 1` (in the order given); it is renamed to what each model expects. Models and defaults follow /chat: an unknown `model` is rejected, and a named model is never switched.
 
 Some generations take minutes to hours. `run_model` submits the run and returns the prediction id right away (`done: false`); the assistant then calls `get_prediction` with that id and `wait_seconds` (max 1800) until `done` is `true`. The task keeps running server-side, so a dropped connection loses nothing. Pass `wait_seconds` to `run_model` to wait for a quick model in the same call. While waiting, both tools send MCP progress notifications that carry the prediction id.
 
