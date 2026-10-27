@@ -25,9 +25,10 @@ describe('media models', () => {
     expect(videoEndpoints(VIDEO_MODELS['seedance-2.5-turbo'])).toEqual({
       text: 'bytedance/seedance-2.5/text-to-video-turbo',
       image: 'bytedance/seedance-2.5/image-to-video-turbo',
+      reference: 'bytedance/seedance-2.5/reference-to-video-turbo',
       edit: 'bytedance/seedance-2.5/video-edit-turbo',
     });
     expect(videoEndpoints(VIDEO_MODELS['minimax-h3']).reference).toBe('wavespeed-ai/minimax-h3/reference-to-video');
-    expect(videoEndpoints(VIDEO_MODELS['seedance-2.0']).reference).toBeUndefined();
+    expect(videoEndpoints(VIDEO_MODELS['seedance-2.0']).reference).toBe('bytedance/seedance-2.0/reference-to-video');
   });
 });

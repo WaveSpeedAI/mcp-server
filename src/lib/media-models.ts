@@ -139,16 +139,16 @@ export function videoModelForEndpoint(modelId: string): VideoModel | undefined {
 export type VideoEndpoints = { text: string; image: string; reference?: string; edit: string; extend?: string }
 
 /**
- * A model's endpoints. Wan, Kling 4.0 and H3 take references on a dedicated
- * reference-to-video endpoint; Seedance takes them on text-to-video. Turbo
- * endpoints have no extend.
+ * A model's endpoints. Every family takes references on a dedicated
+ * reference-to-video endpoint. Seedance has turbo ones; the others do not.
+ * Turbo endpoints have no extend.
  */
 export function videoEndpoints(m: VideoModel): VideoEndpoints {
   const suffix = m.turbo ? '-turbo' : ''
   return {
     text: `${m.base}/text-to-video${suffix}`,
     image: `${m.base}/image-to-video${suffix}`,
-    ...(m.family === 'wan-3.0' || m.family === 'kling-4.0' || m.family === 'minimax-h3' ? { reference: `${m.base}/reference-to-video` } : {}),
+    reference: `${m.base}/reference-to-video${m.family === 'seedance-2.5' || m.family === 'seedance-2.0' ? suffix : ''}`,
     edit: `${m.base}/video-edit${suffix}`,
     ...(m.modes.includes('extend') ? { extend: `${m.base}/video-extend` } : {}),
   }

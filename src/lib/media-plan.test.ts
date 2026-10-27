@@ -93,6 +93,8 @@ const video = (extra: Record<string, Prop> = {}): Record<string, Prop> => ({
 
 const VIDEO_CATALOG = catalog({
   'bytedance/seedance-2.5/text-to-video': video({ reference_images: list(30), reference_videos: list(10) }),
+  // The fixture's Seedance takes no audio references, so audio still moves to another model.
+  'bytedance/seedance-2.5/reference-to-video': video({ reference_images: list(30), reference_videos: list(10) }),
   'bytedance/seedance-2.5/image-to-video': video({ image: str, last_image: str }),
   'bytedance/seedance-2.5/video-edit': video({ video: str, reference_images: list(30) }),
   'bytedance/seedance-2.5/video-extend': video({ video: str, last_image: str }),
@@ -132,9 +134,9 @@ describe('planVideo', () => {
     expect(kling.input).not.toHaveProperty('reference_images');
   });
 
-  it('puts Seedance references on text to video, which takes them', async () => {
+  it('puts Seedance references on reference to video', async () => {
     const plan = await planVideo({ prompt: 'p', reference_images: ['https://x/a.png'] }, 'generate', VIDEO_CATALOG);
-    expect(plan.modelId).toBe('bytedance/seedance-2.5/text-to-video');
+    expect(plan.modelId).toBe('bytedance/seedance-2.5/reference-to-video');
     expect(plan.input.reference_images).toEqual(['https://x/a.png']);
   });
 
@@ -147,7 +149,7 @@ describe('planVideo', () => {
 
   it('does not switch a named model: it leaves out what the model cannot take and names who can', async () => {
     const plan = await planVideo({ prompt: 'p', model: 'seedance-2.5', reference_audios: ['https://x/a.mp3'] }, 'generate', VIDEO_CATALOG);
-    expect(plan.modelId).toBe('bytedance/seedance-2.5/text-to-video');
+    expect(plan.modelId).toBe('bytedance/seedance-2.5/reference-to-video');
     expect(plan.input).not.toHaveProperty('reference_audios');
     expect(plan.notes[0]).toContain('does not take reference_audios');
     expect(plan.notes[0]).toContain('minimax-h3 (reference to video)');
