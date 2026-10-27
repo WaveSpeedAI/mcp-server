@@ -26,9 +26,28 @@ describe('collectLocalFiles', () => {
     expect(collectLocalFiles(input)).toEqual([]);
   });
 
-  it('works in @-form inside prompt fields too', () => {
-    expect(collectLocalFiles({ prompt: '@notes.txt' })).toEqual([
-      { path: 'notes.txt', at: 'prompt' },
+  // Seedance, Kling and others take references written "@Image 1" in the prompt.
+  it('never reads @ in a text field as a file', () => {
+    expect(collectLocalFiles({ prompt: '@Image 1 waves at @Image 2', negative_prompt: '@x' })).toEqual([]);
+    expect(collectLocalFiles({ prompt: '@Image 1 waves', image: '@a.png' })).toEqual([
+      { path: 'a.png', at: 'image' },
+    ]);
+  });
+
+  it('lets the schema decide: uploader components are media, enums and other components are not', () => {
+    const props = {
+      first_frame: { 'x-ui-component': 'uploader' },
+      note: { 'x-ui-component': 'textarea' },
+      image: { enum: ['@a'] },
+    };
+    expect(collectLocalFiles({ first_frame: '@f.png', note: '@n', image: '@a' }, { props })).toEqual([
+      { path: 'f.png', at: 'first_frame' },
+    ]);
+  });
+
+  it('reads every string when the caller passes only media', () => {
+    expect(collectLocalFiles({ anything: '@a.png' }, { allFields: true })).toEqual([
+      { path: 'a.png', at: 'anything' },
     ]);
   });
 
@@ -63,7 +82,7 @@ describe('resolveLocalFiles', () => {
   it('uploads a repeated file once', async () => {
     const upload = vi.fn(async () => 'https://cdn.test/a.png');
     const { uploaded } = await resolveLocalFiles(
-      { image: '@a.png', reference: '@./a.png' },
+      { image: '@a.png', reference_image: '@./a.png' },
       { exists: onDisk('a.png', './a.png'), upload },
     );
     expect(upload).toHaveBeenCalledTimes(1);

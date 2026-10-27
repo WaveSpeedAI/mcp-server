@@ -277,7 +277,7 @@ export function createServer(): McpServer {
 
   server.tool(
     'run_model',
-    'Run any WaveSpeed model. input keys come from get_model_schema; unknown keys are rejected before submission. Local files: pass "@./path" string values — they are uploaded and replaced with hosted URLs (bare paths are NOT uploaded). Returns the prediction id right away (done=false); call get_prediction with that id and wait_seconds until done=true to get the output URLs. The task keeps running on the server. Pass wait_seconds here to wait for a quick model in the same call.',
+    'Run any WaveSpeed model. input keys come from get_model_schema; unknown keys are rejected before submission. Local files: pass "@./path" in a media field (image, images, video, audio, mask …) — it is uploaded and replaced with hosted URLs (bare paths are NOT uploaded). Returns the prediction id right away (done=false); call get_prediction with that id and wait_seconds until done=true to get the output URLs. The task keeps running on the server. Pass wait_seconds here to wait for a quick model in the same call.',
     {
       model: z.string().describe('Model ID from list_models'),
       input: z
@@ -296,6 +296,7 @@ export function createServer(): McpServer {
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async ({ model, input, wait_seconds }, extra) => {
       const resolved = await resolveLocalFiles(input as Record<string, unknown>, {
+        props: (await catalogProps(model).catch(() => null)) ?? undefined,
         upload: async (p) => (await uploadFile(p)).url,
       });
       await assertKnownInputs(model, resolved.input);
@@ -363,7 +364,7 @@ export function createServer(): McpServer {
   async function withUploads<T extends object>(args: T, keys: string[]): Promise<{ args: T; uploaded: number }> {
     const media: Record<string, unknown> = {};
     for (const k of keys) if ((args as Record<string, unknown>)[k] !== undefined) media[k] = (args as Record<string, unknown>)[k];
-    const resolved = await resolveLocalFiles(media, { upload: async (p) => (await uploadFile(p)).url });
+    const resolved = await resolveLocalFiles(media, { allFields: true, upload: async (p) => (await uploadFile(p)).url });
     return { args: { ...args, ...resolved.input }, uploaded: resolved.uploaded };
   }
 
@@ -493,6 +494,7 @@ export function createServer(): McpServer {
       // would be wrong. The 24h content-hash cache means the later run reuses
       // this upload.
       const resolved = await resolveLocalFiles(input as Record<string, unknown>, {
+        props: (await catalogProps(model).catch(() => null)) ?? undefined,
         upload: async (p) => (await uploadFile(p)).url,
       });
       const priceInput = resolved.input;
