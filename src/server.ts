@@ -370,7 +370,7 @@ export function createServer(): McpServer {
   const imageShape = {
     prompt: z.string().min(1).describe('Complete visual prompt: subject, composition, style, lighting, mood.'),
     model: z.enum(IMAGE_MODEL_KEYS as [string, ...string[]]).optional().describe('Only when the user names a model; default is the first (Seedream 5 Pro).'),
-    aspect_ratio: z.string().optional().describe('e.g. 1:1, 16:9, 9:16, 4:3, 3:4; snapped to what the model supports.'),
+    aspect_ratio: z.string().optional().describe('e.g. 1:1, 16:9, 9:16, 4:3, 3:4; snapped to what the model supports. If omitted: text-to-image is 1:1; with input images it is determined automatically from the input image.'),
     resolution: z.enum(['1k', '2k', '4k']).optional().describe('Only when the user asks for a size.'),
     wait_seconds: waitSchema,
     estimate_only: estimateSchema,
@@ -425,7 +425,7 @@ export function createServer(): McpServer {
       reference_audios: mediaList('Optional audio for voice, music or sound to use').optional(),
       duration: durationSchema,
       resolution: resolutionSchema,
-      aspect_ratio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']).optional(),
+      aspect_ratio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']).optional().describe("If omitted, the model's default ratio is used; with first_frame the video follows that image's shape and this is ignored."),
       wait_seconds: waitSchema,
       estimate_only: estimateSchema,
     },
