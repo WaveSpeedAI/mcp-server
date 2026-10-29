@@ -21,6 +21,8 @@
   .tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .tile img, .tile video { display: block; width: 100%; max-height: 520px; object-fit: contain; background: var(--card); }
   .tile video { background: #000; }
+  .code { margin: 0; padding: 12px; max-height: 360px; overflow: auto; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+  .text { padding: 12px; white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; }
   .broken { padding: 28px 12px; text-align: center; color: var(--muted); font-size: 13px; }
   .tile img { cursor: zoom-in; }
   .tile audio { display: block; width: 100%; padding: 10px; }
@@ -113,19 +115,21 @@
     resize();
   }
 
-  function urlOf(o) {
-    if (typeof o === "string") return o;
-    if (o && typeof o === "object") return o.url || o.download_url || o.href || "";
-    return "";
-  }
+  // File types by extension, the same lists the WaveSpeed site uses to pick a preview.
+  var EXT = {
+    image: "jpg jpeg png gif webp avif bmp tiff tif svg ico",
+    video: "mp4 mov avi mkv webm flv wmv m4v",
+    audio: "mp3 wav m4a ogg aac flac wma aiff au mid midi rmi opus",
+    model: "glb gltf",
+    subtitle: "srt vtt",
+  };
   function kindOf(url) {
     var path = url.split("?")[0].split("#")[0].toLowerCase();
     var ext = path.slice(path.lastIndexOf(".") + 1);
-    if (/^(png|jpe?g|webp|gif|avif|bmp)$/.test(ext)) return "image";
-    if (/^(mp4|webm|mov|m4v)$/.test(ext)) return "video";
-    if (/^(mp3|wav|m4a|ogg|flac|aac)$/.test(ext)) return "audio";
+    for (var k in EXT) if ((" " + EXT[k] + " ").indexOf(" " + ext + " ") >= 0) return k;
     return "file";
   }
+  var KIND_LABEL = { model: "3D model", subtitle: "Subtitles", file: "File" };
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -138,30 +142,55 @@
     return b;
   }
 
-  function tile(url) {
-    var kind = kindOf(url), t = el("div", "tile"), media;
-    if (!/^https?:\/\//i.test(url)) return null;
+  function brokenNote(t, media, what) {
+    // The host may not let the card load this address; say so and keep the Open button working.
+    media.addEventListener("error", function () {
+      if (media.parentNode !== t) return;
+      t.replaceChild(el("div", "broken", "This chat can't show the " + what + " here. Use Open / save."), media); resize();
+    });
+  }
+
+  // One tile per output. Outputs are links to files, plain text, or JSON.
+  function tile(o) {
+    var t = el("div", "tile");
+    if (o !== null && typeof o === "object") {
+      var text = JSON.stringify(o, null, 2);
+      t.appendChild(el("pre", "code", text));
+      var jm = el("div", "meta"); jm.appendChild(el("span", "", "JSON"));
+      var cb = el("button", "", "Copy");
+      cb.addEventListener("click", function () {
+        try { navigator.clipboard.writeText(text).then(function () { cb.textContent = "Copied"; }, function () { cb.textContent = "Copy failed"; }); }
+        catch (e) { cb.textContent = "Copy failed"; }
+      });
+      jm.appendChild(cb); t.appendChild(jm);
+      return t;
+    }
+    var url = typeof o === "string" ? o : String(o);
+    if (!/^https?:\/\//i.test(url)) { t.appendChild(el("div", "text", url)); return t; }
+    var kind = kindOf(url), media;
     if (kind === "image") {
       media = el("img"); media.src = url; media.alt = "Generated image"; media.loading = "lazy";
       media.addEventListener("click", function () { openLink(url); });
       media.addEventListener("load", resize);
-      // The host may not let the card load this address; say so and keep the Open button working.
-      media.addEventListener("error", function () {
-        var m = el("div", "broken", "This chat can't show the image here. Use Open / save.");
-        t.replaceChild(m, media); resize();
-      });
+      brokenNote(t, media, "image");
       t.appendChild(media);
     } else if (kind === "video") {
-      media = el("video"); media.src = url; media.controls = true; media.playsInline = true; media.preload = "metadata";
+      // #t=0.001 makes the browser draw the first frame; without it iOS shows a black box until play.
+      media = el("video"); media.src = url + (url.indexOf("#") < 0 ? "#t=0.001" : ""); media.controls = true; media.playsInline = true; media.preload = "metadata";
       media.addEventListener("loadedmetadata", resize);
+      brokenNote(t, media, "video");
       t.appendChild(media);
     } else if (kind === "audio") {
       media = el("audio"); media.src = url; media.controls = true; media.preload = "metadata";
+      brokenNote(t, media, "audio");
       t.appendChild(media);
+    } else {
+      // 3D models, subtitles, documents and other links cannot be drawn here: show the link.
+      t.appendChild(el("div", "text", url.split("?")[0].split("/").pop() || url));
     }
-    var meta = el("div", "meta"), name = url.split("?")[0].split("/").pop() || "file";
-    meta.appendChild(el("span", "", kind === "file" ? name : kind));
-    meta.appendChild(openButton(url, kind === "file" ? "Open" : "Open / save"));
+    var meta = el("div", "meta");
+    meta.appendChild(el("span", "", KIND_LABEL[kind] || kind));
+    meta.appendChild(openButton(url, kind === "file" || kind === "model" || kind === "subtitle" ? "Open" : "Open / save"));
     t.appendChild(meta);
     return t;
   }
@@ -191,10 +220,10 @@
       body.appendChild(el("div", "err", String(d.error)));
       setState("failed");
     } else {
-      var urls = (d.outputs || []).map(urlOf).filter(Boolean);
-      if (urls.length) {
-        var grid = el("div", "grid" + (urls.length === 1 ? " one" : ""));
-        urls.forEach(function (u) { var t = tile(u); if (t) grid.appendChild(t); });
+      var outs = (d.outputs || []).filter(function (o) { return o !== null && o !== undefined && o !== ""; });
+      if (outs.length) {
+        var grid = el("div", "grid" + (outs.length === 1 ? " one" : ""));
+        outs.forEach(function (o) { grid.appendChild(tile(o)); });
         body.appendChild(grid);
         setState(d.status === "completed" || d.done ? "done" : (d.status || ""));
       } else if (d.status && !d.done) {
