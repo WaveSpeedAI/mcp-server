@@ -19,7 +19,9 @@
   .grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   .grid.one { grid-template-columns: 1fr; }
   .tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .tile img, .tile video { display: block; width: 100%; max-height: 520px; object-fit: contain; background: #000; }
+  .tile img, .tile video { display: block; width: 100%; max-height: 520px; object-fit: contain; background: var(--card); }
+  .tile video { background: #000; }
+  .broken { padding: 28px 12px; text-align: center; color: var(--muted); font-size: 13px; }
   .tile img { cursor: zoom-in; }
   .tile audio { display: block; width: 100%; padding: 10px; }
   .tile .meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; font-size: 12px; color: var(--muted); }
@@ -143,6 +145,11 @@
       media = el("img"); media.src = url; media.alt = "Generated image"; media.loading = "lazy";
       media.addEventListener("click", function () { openLink(url); });
       media.addEventListener("load", resize);
+      // The host may not let the card load this address; say so and keep the Open button working.
+      media.addEventListener("error", function () {
+        var m = el("div", "broken", "This chat can't show the image here. Use Open / save.");
+        t.replaceChild(m, media); resize();
+      });
       t.appendChild(media);
     } else if (kind === "video") {
       media = el("video"); media.src = url; media.controls = true; media.playsInline = true; media.preload = "metadata";

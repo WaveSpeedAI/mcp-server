@@ -18,8 +18,9 @@ export const UI_TOOLS = new Set([
   'extend_video',
 ]);
 
-// Outputs normally sit on our CDNs, but not always: any https source may load.
-export const VIEW_RESOURCE_DOMAINS = ['https:'];
+// "https:" alone should allow every https source, but a host may only honour named hosts when it builds the
+// card's CSP, so our own media CDNs are named as well.
+export const VIEW_RESOURCE_DOMAINS = ['https:', 'https://d2h7xmz5gqybh9.cloudfront.net', 'https://static.wavespeed.ai'];
 
 export function loadView(): string {
   return readFileSync(new URL('../../assets/result.html', import.meta.url), 'utf8');
