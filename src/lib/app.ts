@@ -19,8 +19,8 @@ export const UI_TOOLS = new Set([
 ]);
 
 // "https:" alone should allow every https source, but a host may only honour named hosts when it builds the
-// card's CSP, so our own media CDNs are named as well.
-export const VIEW_RESOURCE_DOMAINS = ['https:', 'https://d2h7xmz5gqybh9.cloudfront.net', 'https://static.wavespeed.ai'];
+// card's CSP, so the usual media hosts are named too, as wildcards.
+export const VIEW_RESOURCE_DOMAINS = ['https:', 'https://*.cloudfront.net', 'https://*.wavespeed.ai', 'https://*.amazonaws.com'];
 
 export function loadView(): string {
   return readFileSync(new URL('../../assets/result.html', import.meta.url), 'utf8');
