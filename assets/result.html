@@ -11,7 +11,7 @@
   :root[data-theme="dark"] { --fg: #fff; --muted: #94a3b8; --line: #404040; --card: #262626; --hover: #383838; --bad: #f05252; --bg: #171717; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --fg: #fff; --muted: #94a3b8; --line: #404040; --card: #262626; --hover: #383838; --bad: #f05252; --bg: #171717; } }
   * { box-sizing: border-box; }
-  body { margin: 0; padding: 12px; font: 14px/1.5 "Geist", "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: transparent; -webkit-font-smoothing: antialiased; }
+  body { margin: 0; padding: 12px; font: 14px/1.5 var(--font-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif); color: var(--fg); background: transparent; -webkit-font-smoothing: antialiased; }
   .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
   .model { font-weight: 600; word-break: break-all; }
   .state { color: var(--muted); font-size: 12px; white-space: nowrap; }
@@ -84,8 +84,20 @@
     else if (m.method === "ping" && m.id !== undefined) { send({ jsonrpc: "2.0", id: m.id, result: {} }); }
   });
 
+  // The host's own look: its theme, its font variables (--font-sans) and the @font-face rules that load them.
   function applyContext(ctx) {
     if (ctx.theme === "dark" || ctx.theme === "light") document.documentElement.setAttribute("data-theme", ctx.theme);
+    var st = ctx.styles || {};
+    var vars = st.variables || {};
+    Object.keys(vars).forEach(function (k) {
+      if (/^--font-/.test(k) && typeof vars[k] === "string") document.documentElement.style.setProperty(k, vars[k]);
+    });
+    var fonts = st.css && st.css.fonts;
+    if (typeof fonts === "string" && fonts) {
+      var tag = document.getElementById("host-fonts");
+      if (!tag) { tag = document.createElement("style"); tag.id = "host-fonts"; document.head.appendChild(tag); }
+      tag.textContent = fonts;
+    }
   }
   function openLink(url) {
     if (!/^https:\/\//i.test(url)) return;
