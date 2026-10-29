@@ -18,9 +18,10 @@
   .prompt { color: var(--muted); margin: 0 0 10px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   .grid.one { grid-template-columns: 1fr; }
-  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .tile { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .tile img, .tile video { display: block; width: 100%; max-height: 520px; object-fit: contain; background: var(--card); }
   .tile video { background: #000; }
+  .tile-spin { position: absolute; top: 40%; left: 50%; margin: -9px 0 0 -9px; pointer-events: none; }
   .code { margin: 0; padding: 12px; max-height: 360px; overflow: auto; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
   .text { padding: 12px; white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; }
   .broken { padding: 28px 12px; text-align: center; color: var(--muted); font-size: 13px; }
@@ -142,6 +143,21 @@
     return b;
   }
 
+  // Like the site: one thing plays at a time.
+  function onlyOnePlays(media) {
+    media.addEventListener("play", function () {
+      document.querySelectorAll("video, audio").forEach(function (m) { if (m !== media) m.pause(); });
+    });
+  }
+  // A spinner stands in until the media has something to draw (the site does the same).
+  function withSpinner(t, media, readyEvent) {
+    var sp = el("div", "spin tile-spin");
+    t.appendChild(sp);
+    var done = function () { if (sp.parentNode) sp.parentNode.removeChild(sp); };
+    media.addEventListener(readyEvent, done);
+    media.addEventListener("error", done);
+  }
+
   function brokenNote(t, media, what) {
     // The host may not let the card load this address; say so and keep the Open button working.
     media.addEventListener("error", function () {
@@ -174,14 +190,18 @@
       media.addEventListener("load", resize);
       brokenNote(t, media, "image");
       t.appendChild(media);
+      withSpinner(t, media, "load");
     } else if (kind === "video") {
       // #t=0.001 makes the browser draw the first frame; without it iOS shows a black box until play.
-      media = el("video"); media.src = url + (url.indexOf("#") < 0 ? "#t=0.001" : ""); media.controls = true; media.playsInline = true; media.preload = "metadata";
+      media = el("video"); media.src = url + (url.indexOf("#") < 0 ? "#t=0.001" : ""); media.controls = true; media.playsInline = true; media.preload = "metadata"; media.loop = true;
       media.addEventListener("loadedmetadata", resize);
+      onlyOnePlays(media);
       brokenNote(t, media, "video");
       t.appendChild(media);
+      withSpinner(t, media, "loadeddata");
     } else if (kind === "audio") {
       media = el("audio"); media.src = url; media.controls = true; media.preload = "metadata";
+      onlyOnePlays(media);
       brokenNote(t, media, "audio");
       t.appendChild(media);
     } else {
