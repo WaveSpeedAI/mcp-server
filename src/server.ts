@@ -43,6 +43,15 @@ import { MAX_DELETE_IDS, prepareDelete, summarizeDelete } from './lib/delete-pre
 // Where to add credit; handed to the assistant next to the balance.
 const TOP_UP_URL = 'https://wavespeed.ai/top-up';
 import { resolveLocalFiles } from './lib/local-files.js';
+import {
+  APP_MIME_TYPE,
+  RESULT_VIEW_URI,
+  UI_TOOLS,
+  VIEW_RESOURCE_DOMAINS,
+  insufficientCreditsResult,
+  isInsufficientCredits,
+  loadView,
+} from './lib/app.js';
 import { uploadWithCache } from './lib/upload-cache.js';
 import { findUnknownInputs } from './lib/validate-inputs.js';
 import { IMAGE_MODEL_KEYS, VIDEO_MODEL_KEYS } from './lib/media-models.js';
@@ -195,7 +204,13 @@ async function reportPrediction(
 }
 
 function ok(payload: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
+  const res: { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown> } = {
+    content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
+  };
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    res.structuredContent = payload as Record<string, unknown>;
+  }
+  return res;
 }
 
 export function createServer(): McpServer {
@@ -217,6 +232,46 @@ export function createServer(): McpServer {
         'run_model returns done=false, keep the id and poll get_prediction.',
       ].join(' '),
     },
+  );
+
+  // Every tool gets the same two additions: a balance that is too low comes back with the top-up link, and the
+  // tools that show a result point at the result card.
+  const registerTool = server.tool.bind(server) as (...args: any[]) => any;
+  (server as any).tool = (...args: any[]) => {
+    const name = args[0] as string;
+    const cb = args[args.length - 1] as (...a: any[]) => Promise<unknown>;
+    args[args.length - 1] = async (...a: any[]) => {
+      try {
+        return await cb(...a);
+      } catch (err: any) {
+        const message = String(err?.message ?? err);
+        if (!isInsufficientCredits(message)) throw err;
+        return insufficientCreditsResult(message, a[0]?.model);
+      }
+    };
+    const tool = registerTool(...args);
+    if (UI_TOOLS.has(name)) tool.update({ _meta: { ui: { resourceUri: RESULT_VIEW_URI } } });
+    return tool;
+  };
+
+  server.registerResource(
+    'result-card',
+    RESULT_VIEW_URI,
+    {
+      title: 'WaveSpeed result card',
+      description: 'Shows the images, videos and audio of a WaveSpeed run, and refreshes while it is running.',
+      mimeType: APP_MIME_TYPE,
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: APP_MIME_TYPE,
+          text: loadView(),
+          _meta: { ui: { csp: { resourceDomains: VIEW_RESOURCE_DOMAINS, connectDomains: [] }, prefersBorder: true } },
+        },
+      ],
+    }),
   );
 
   server.tool(

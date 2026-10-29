@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WaveSpeed result</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fff; --fg: #111; --muted: #667; --line: #dde; --accent: #5b4bff; --card: #f6f6fa; --bad: #c0392b; }
+  :root[data-theme="dark"] { --bg: #151518; --fg: #f1f1f4; --muted: #9a9aa8; --line: #2d2d36; --card: #1e1e24; --accent: #8f84ff; --bad: #ff7b6b; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #151518; --fg: #f1f1f4; --muted: #9a9aa8; --line: #2d2d36; --card: #1e1e24; --accent: #8f84ff; --bad: #ff7b6b; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 12px; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); }
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .model { font-weight: 600; word-break: break-all; }
+  .state { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .prompt { color: var(--muted); margin: 0 0 10px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .grid.one { grid-template-columns: 1fr; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .tile img, .tile video { display: block; width: 100%; max-height: 520px; object-fit: contain; background: #000; }
+  .tile img { cursor: zoom-in; }
+  .tile audio { display: block; width: 100%; padding: 10px; }
+  .tile .meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; color: var(--muted); }
+  button, a.btn { font: inherit; font-size: 13px; color: var(--accent); background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; cursor: pointer; text-decoration: none; }
+  button:hover, a.btn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .wait { display: flex; align-items: center; gap: 10px; padding: 16px; background: var(--card); border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); }
+  .spin { width: 18px; height: 18px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s 0.9s linear infinite; flex: none; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  .err { padding: 12px; border: 1px solid var(--bad); border-radius: 10px; color: var(--bad); }
+  .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .note { margin-top: 8px; color: var(--muted); font-size: 12px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="head"><span class="model" id="model">WaveSpeed</span><span class="state" id="state"></span></div>
+<p class="prompt" id="prompt" hidden></p>
+<div id="body"></div>
+<div class="actions" id="actions" hidden></div>
+<div class="note" id="note" hidden></div>
+<script>
+(function () {
+  "use strict";
+  // A small MCP Apps view (https://modelcontextprotocol.io/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp):
+  // it speaks JSON-RPC to the host over postMessage and shows what the tool returned.
+  var PROTOCOL = "2026-01-26";
+  var nextId = 1, pending = {}, args = {}, current = null, pollToken = 0, started = 0, ticker = null;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function send(msg) { try { window.parent.postMessage(msg, "*"); } catch (e) {} }
+  function request(method, params) {
+    return new Promise(function (resolve, reject) {
+      var id = nextId++;
+      pending[id] = { resolve: resolve, reject: reject };
+      send({ jsonrpc: "2.0", id: id, method: method, params: params || {} });
+      setTimeout(function () { if (pending[id]) { delete pending[id]; reject(new Error("timeout")); } }, 130000);
+    });
+  }
+  function notify(method, params) { send({ jsonrpc: "2.0", method: method, params: params || {} }); }
+
+  window.addEventListener("message", function (e) {
+    if (e.source !== window.parent) return;
+    var m = e.data;
+    if (!m || m.jsonrpc !== "2.0") return;
+    if (m.id !== undefined && !m.method) {
+      var p = pending[m.id];
+      if (!p) return;
+      delete pending[m.id];
+      if (m.error) p.reject(new Error(m.error.message || "error")); else p.resolve(m.result);
+      return;
+    }
+    if (m.method === "ui/notifications/tool-input") { args = (m.params && m.params.arguments) || {}; showPrompt(); }
+    else if (m.method === "ui/notifications/tool-result") { show(m.params || {}); }
+    else if (m.method === "ui/notifications/host-context-changed") { applyContext(m.params || {}); }
+    else if (m.method === "ui/notifications/tool-cancelled") { pollToken++; setState("cancelled"); }
+    else if (m.method === "ui/resource-teardown" && m.id !== undefined) { pollToken++; send({ jsonrpc: "2.0", id: m.id, result: {} }); }
+    else if (m.method === "ping" && m.id !== undefined) { send({ jsonrpc: "2.0", id: m.id, result: {} }); }
+  });
+
+  function applyContext(ctx) {
+    if (ctx.theme === "dark" || ctx.theme === "light") document.documentElement.setAttribute("data-theme", ctx.theme);
+  }
+  function openLink(url) {
+    if (!/^https:\/\//i.test(url)) return;
+    request("ui/open-link", { url: url }).catch(function () {});
+  }
+  function setState(t) { $("state").textContent = t || ""; }
+  function showPrompt() {
+    var text = args.prompt || (args.input && args.input.prompt) || "";
+    var el = $("prompt");
+    if (text) { el.textContent = String(text); el.hidden = false; } else { el.hidden = true; }
+    resize();
+  }
+
+  function urlOf(o) {
+    if (typeof o === "string") return o;
+    if (o && typeof o === "object") return o.url || o.download_url || o.href || "";
+    return "";
+  }
+  function kindOf(url) {
+    var path = url.split("?")[0].split("#")[0].toLowerCase();
+    var ext = path.slice(path.lastIndexOf(".") + 1);
+    if (/^(png|jpe?g|webp|gif|avif|bmp)$/.test(ext)) return "image";
+    if (/^(mp4|webm|mov|m4v)$/.test(ext)) return "video";
+    if (/^(mp3|wav|m4a|ogg|flac|aac)$/.test(ext)) return "audio";
+    return "file";
+  }
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  function openButton(url, label) {
+    var b = el("button", "", label || "Open");
+    b.addEventListener("click", function () { openLink(url); });
+    return b;
+  }
+
+  function tile(url) {
+    var kind = kindOf(url), t = el("div", "tile"), media;
+    if (!/^https?:\/\//i.test(url)) return null;
+    if (kind === "image") {
+      media = el("img"); media.src = url; media.alt = "Generated image"; media.loading = "lazy";
+      media.addEventListener("click", function () { openLink(url); });
+      media.addEventListener("load", resize);
+      t.appendChild(media);
+    } else if (kind === "video") {
+      media = el("video"); media.src = url; media.controls = true; media.playsInline = true; media.preload = "metadata";
+      media.addEventListener("loadedmetadata", resize);
+      t.appendChild(media);
+    } else if (kind === "audio") {
+      media = el("audio"); media.src = url; media.controls = true; media.preload = "metadata";
+      t.appendChild(media);
+    }
+    var meta = el("div", "meta"), name = url.split("?")[0].split("/").pop() || "file";
+    meta.appendChild(el("span", "", kind === "file" ? name : kind));
+    meta.appendChild(openButton(url, kind === "file" ? "Open" : "Open / save"));
+    t.appendChild(meta);
+    return t;
+  }
+
+  function show(result) {
+    var data = result.structuredContent;
+    if (!data) {
+      // No structured data (an error, or a host that drops it): say what the tool said.
+      var text = (result.content || []).map(function (c) { return c && c.text || ""; }).join("\n").trim();
+      try { var parsed = JSON.parse(text); if (parsed && typeof parsed === "object") data = parsed; } catch (e) {}
+      if (!data) data = result.isError ? { error: text || "The request failed." } : { note: text };
+    }
+    current = data;
+    pollToken++;
+    render(data);
+    var running = data.status && !data.done && !data.error && ["created", "processing", "queued", "pending"].indexOf(data.status) >= 0;
+    if (running && data.id) poll(data.id, pollToken);
+  }
+
+  function render(d) {
+    var body = $("body"), actions = $("actions"), note = $("note");
+    body.textContent = ""; actions.textContent = ""; actions.hidden = true; note.hidden = true;
+    if (d.model) $("model").textContent = d.model;
+    clearInterval(ticker);
+
+    if (d.error) {
+      body.appendChild(el("div", "err", String(d.error)));
+      setState("failed");
+    } else {
+      var urls = (d.outputs || []).map(urlOf).filter(Boolean);
+      if (urls.length) {
+        var grid = el("div", "grid" + (urls.length === 1 ? " one" : ""));
+        urls.forEach(function (u) { var t = tile(u); if (t) grid.appendChild(t); });
+        body.appendChild(grid);
+        setState(d.status === "completed" || d.done ? "done" : (d.status || ""));
+      } else if (d.status && !d.done) {
+        var w = el("div", "wait"); w.appendChild(el("div", "spin"));
+        var label = el("span", "", "Generating…");
+        w.appendChild(label); body.appendChild(w);
+        started = started || Date.now();
+        var tick = function () { var s = Math.round((Date.now() - started) / 1000); label.textContent = "Generating… " + s + " s. Video can take a few minutes."; };
+        tick(); ticker = setInterval(tick, 1000);
+        setState(d.status);
+      } else if (d.note) {
+        body.appendChild(el("p", "", String(d.note)));
+      } else if (d.status) {
+        setState(d.status);
+      }
+      if (d.price !== undefined && d.price !== null) {
+        note.textContent = "Charged about $" + (typeof d.price === "number" ? d.price.toFixed(4) : d.price);
+        note.hidden = false;
+      }
+    }
+    if (d.top_up_url) {
+      var b = el("button", "primary", "Top up credits");
+      b.addEventListener("click", function () { openLink(d.top_up_url); });
+      actions.appendChild(b); actions.hidden = false;
+    }
+    resize();
+  }
+
+  // Keep asking the server while the run is going: this is what turns a video's wait into a card that fills in.
+  function poll(id, token) {
+    var asked = 0;
+    (function again() {
+      if (token !== pollToken) return;
+      asked++;
+      request("tools/call", { name: "get_prediction", arguments: { id: id, wait_seconds: 25 } }).then(function (res) {
+        if (token !== pollToken) return;
+        var d = res && res.structuredContent;
+        if (!d) {
+          var text = ((res && res.content) || []).map(function (c) { return c && c.text || ""; }).join("");
+          try { d = JSON.parse(text); } catch (e) {}
+        }
+        if (res && res.isError && !(d && d.error)) d = { error: ((res.content || [])[0] || {}).text || "The run failed." };
+        if (!d) { $("note").textContent = "Still running. Ask the assistant to check on it."; $("note").hidden = false; return; }
+        if (d.error || d.done || ["completed", "failed", "cancelled", "timeout", "deleted"].indexOf(d.status) >= 0) {
+          if (d.status && d.status !== "completed" && !d.error) d.error = "Prediction " + d.status + (d.error ? ": " + d.error : "");
+          current = d; render(d); return;
+        }
+        if (asked < 80) again(); else { $("note").textContent = "Still running on the server. Ask the assistant to check on it."; $("note").hidden = false; }
+      }).catch(function () {
+        if (token !== pollToken) return;
+        $("note").textContent = "This chat cannot refresh the card by itself. Ask the assistant to check on the run.";
+        $("note").hidden = false; resize();
+      });
+    })();
+  }
+
+  var lastHeight = 0;
+  function resize() {
+    var h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    if (h === lastHeight) return;
+    lastHeight = h;
+    notify("ui/notifications/size-changed", { width: Math.ceil(document.documentElement.getBoundingClientRect().width), height: h });
+  }
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(document.body);
+
+  // Handshake with the host, then wait for tool-input and tool-result.
+  request("ui/initialize", { protocolVersion: PROTOCOL, appInfo: { name: "wavespeed-result", version: "1.0.0" }, appCapabilities: {} })
+    .then(function (r) { if (r && r.hostContext) applyContext(r.hostContext); notify("ui/notifications/initialized", {}); })
+    .catch(function () { notify("ui/notifications/initialized", {}); });
+
+  // ChatGPT's own bridge, when the host offers it instead of the standard messages.
+  function fromOpenAI() {
+    var o = window.openai;
+    if (o && o.toolOutput && !current) show({ structuredContent: o.toolOutput });
+    if (o && o.theme) applyContext({ theme: o.theme });
+  }
+  window.addEventListener("openai:set_globals", fromOpenAI);
+  setTimeout(fromOpenAI, 300);
+})();
+</script>
+</body>
+</html>
