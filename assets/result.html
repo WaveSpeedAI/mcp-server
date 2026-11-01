@@ -56,7 +56,7 @@
   // A small MCP Apps view (https://modelcontextprotocol.io/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp):
   // it speaks JSON-RPC to the host over postMessage and shows what the tool returned.
   var PROTOCOL = "2026-01-26";
-  var nextId = 1, pending = {}, args = {}, current = null, pollToken = 0, started = 0, ticker = null;
+  var nextId = 1, pending = {}, args = {}, current = null, pollToken = 0, started = 0, ticker = null, hostCaps = null;
   var $ = function (id) { return document.getElementById(id); };
 
   function send(msg) { try { window.parent.postMessage(msg, "*"); } catch (e) {} }
@@ -78,7 +78,11 @@
       var p = pending[m.id];
       if (!p) return;
       delete pending[m.id];
-      if (m.error) p.reject(new Error(m.error.message || "error")); else p.resolve(m.result);
+      if (m.error) {
+        var err = new Error(m.error.message || "error");
+        err.code = m.error.code;
+        p.reject(err);
+      } else p.resolve(m.result);
       return;
     }
     if (m.method === "ui/notifications/tool-input") { args = (m.params && m.params.arguments) || {}; showPrompt(); }
@@ -251,7 +255,9 @@
         var label = el("span", "", "Generating…");
         w.appendChild(label); body.appendChild(w);
         started = started || Date.now();
-        var tick = function () { var s = Math.round((Date.now() - started) / 1000); label.textContent = "Generating… " + s + " s. Video can take a few minutes."; };
+        // Only a video run says it can take minutes; images and audio finish much sooner.
+        var isVideo = /video|t2v|i2v/i.test(String(d.model || ""));
+        var tick = function () { var s = Math.round((Date.now() - started) / 1000); label.textContent = "Generating… " + s + " s." + (isVideo ? " Video can take a few minutes." : ""); };
         tick(); ticker = setInterval(tick, 1000);
         setState(d.status);
       } else if (d.note) {
@@ -272,6 +278,28 @@
     resize();
   }
 
+  // The card can no longer follow the run (the host refused its tool call, or it gave up): stop the timer and
+  // the spinner so it does not look as if it is still generating, and say where the result will appear.
+  function stopFollowing(message) {
+    clearInterval(ticker);
+    var body = $("body");
+    if (!(current && (current.outputs || []).length)) {
+      body.textContent = "";
+      body.appendChild(el("p", "", "Started. This card stops here; the result appears when the assistant checks on the run."));
+      setState("submitted");
+    }
+    $("note").textContent = message; $("note").hidden = false; resize();
+  }
+
+  // Say what actually went wrong when the host refused the card's tool call, so it can be told apart from a timeout.
+  function whyNot(err) {
+    if (window.console) console.warn("wavespeed-result: get_prediction failed", err, "hostCapabilities:", hostCaps);
+    if (err && err.message === "timeout") return "no answer from this chat in 130 seconds";
+    var said = "this chat said: " + ((err && err.message) || "error") + (err && err.code !== undefined ? " [" + err.code + "]" : "");
+    if (hostCaps && !hostCaps.serverTools) said += "; it does not declare tool calls for cards";
+    return said;
+  }
+
   // Keep asking the server while the run is going: this is what turns a video's wait into a card that fills in.
   function poll(id, token) {
     var asked = 0;
@@ -286,16 +314,15 @@
           try { d = JSON.parse(text); } catch (e) {}
         }
         if (res && res.isError && !(d && d.error)) d = { error: ((res.content || [])[0] || {}).text || "The run failed." };
-        if (!d) { $("note").textContent = "Still running. Ask the assistant to check on it."; $("note").hidden = false; return; }
+        if (!d) { stopFollowing("Still running. Ask the assistant to check on it."); return; }
         if (d.error || d.done || ["completed", "failed", "cancelled", "timeout", "deleted"].indexOf(d.status) >= 0) {
           if (d.status && d.status !== "completed" && !d.error) d.error = "Prediction " + d.status + (d.error ? ": " + d.error : "");
           current = d; render(d); return;
         }
-        if (asked < 80) again(); else { $("note").textContent = "Still running on the server. Ask the assistant to check on it."; $("note").hidden = false; }
-      }).catch(function () {
+        if (asked < 80) again(); else stopFollowing("Still running on the server. Ask the assistant to check on it.");
+      }).catch(function (err) {
         if (token !== pollToken) return;
-        $("note").textContent = "This chat cannot refresh the card by itself. Ask the assistant to check on the run.";
-        $("note").hidden = false; resize();
+        stopFollowing("The card could not check on the run (" + whyNot(err) + "). Ask the assistant to check on it.");
       });
     })();
   }
@@ -311,7 +338,7 @@
 
   // Handshake with the host, then wait for tool-input and tool-result.
   request("ui/initialize", { protocolVersion: PROTOCOL, appInfo: { name: "wavespeed-result", version: "1.0.0" }, appCapabilities: {} })
-    .then(function (r) { if (r && r.hostContext) applyContext(r.hostContext); notify("ui/notifications/initialized", {}); })
+    .then(function (r) { hostCaps = (r && r.hostCapabilities) || {}; if (r && r.hostContext) applyContext(r.hostContext); notify("ui/notifications/initialized", {}); })
     .catch(function () { notify("ui/notifications/initialized", {}); });
 
   // ChatGPT's own bridge, when the host offers it instead of the standard messages.
