@@ -4,8 +4,7 @@
 // remote server (api-server /mcp) serves; keep the two copies identical.
 import { readFileSync } from 'node:fs';
 
-// A host keeps a UI resource by its URI, so a changed card only reaches it under a new URI: bump the number.
-export const RESULT_VIEW_URI = 'ui://wavespeed/result-v2.html';
+export const RESULT_VIEW_URI = 'ui://wavespeed/result.html';
 export const APP_MIME_TYPE = 'text/html;profile=mcp-app';
 export const TOP_UP_URL = 'https://wavespeed.ai/top-up';
 
