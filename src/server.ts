@@ -215,7 +215,16 @@ function ok(payload: unknown) {
 
 export function createServer(): McpServer {
   const server = new McpServer(
-    { name: 'wavespeed', version: PKG_VERSION },
+    {
+      name: 'wavespeed',
+      title: 'WaveSpeed',
+      version: PKG_VERSION,
+      websiteUrl: 'https://wavespeed.ai',
+      icons: [
+        { src: 'https://wavespeed.ai/favicon.svg', mimeType: 'image/svg+xml', sizes: ['any'] },
+        { src: 'https://wavespeed.ai/apple-touch-icon.png', mimeType: 'image/png', sizes: ['192x192'] },
+      ],
+    },
     {
       instructions: [
         'WaveSpeed AI media generation (image, video, audio, 3D).',

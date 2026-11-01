@@ -1,17 +1,34 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "ai.wavespeed/mcp",
+  "title": "WaveSpeed",
   "description": "Run any model on the live WaveSpeed catalog: image, video, audio, 3D.",
+  "icons": [
+    {
+      "src": "https://wavespeed.ai/favicon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
+    },
+    {
+      "src": "https://wavespeed.ai/apple-touch-icon.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "192x192"
+      ]
+    }
+  ],
   "repository": {
     "url": "https://github.com/WaveSpeedAI/mcp-server",
     "source": "github"
   },
-  "version": "1.2.2",
+  "version": "1.2.3",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@wavespeed/mcp",
-      "version": "1.2.2",
+      "version": "1.2.3",
       "transport": {
         "type": "stdio"
       },
