@@ -31,8 +31,17 @@ describe('result card', () => {
     const { tools } = await client.listTools();
     const linked = tools.filter((t) => (t._meta as any)?.ui?.resourceUri === RESULT_VIEW_URI).map((t) => t.name);
     expect(linked.sort()).toEqual(
-      ['edit_image', 'edit_video', 'extend_video', 'generate_image', 'generate_video', 'get_prediction', 'run_model'],
+      ['edit_image', 'edit_video', 'extend_video', 'generate_image', 'generate_video', 'run_model'],
     );
+
+    // get_prediction opens no card of its own but may be called from it, in both vocabularies.
+    const poll = tools.find((t) => t.name === 'get_prediction')!._meta as any;
+    expect(poll.ui.resourceUri).toBeUndefined();
+    expect(poll.ui.visibility).toEqual(['model', 'app']);
+    expect(poll['openai/widgetAccessible']).toBe(true);
+    const run = tools.find((t) => t.name === 'run_model')!._meta as any;
+    expect(run['openai/outputTemplate']).toBe(RESULT_VIEW_URI);
+    expect(run['openai/toolInvocation/invoking'].length).toBeLessThanOrEqual(64);
 
     const res = await client.readResource({ uri: RESULT_VIEW_URI });
     expect(res.contents[0].mimeType).toBe(APP_MIME_TYPE);

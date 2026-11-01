@@ -46,7 +46,7 @@ import { resolveLocalFiles } from './lib/local-files.js';
 import {
   APP_MIME_TYPE,
   RESULT_VIEW_URI,
-  UI_TOOLS,
+  toolMeta,
   VIEW_RESOURCE_DOMAINS,
   insufficientCreditsResult,
   isInsufficientCredits,
@@ -259,7 +259,8 @@ export function createServer(): McpServer {
       }
     };
     const tool = registerTool(...args);
-    if (UI_TOOLS.has(name)) tool.update({ _meta: { ui: { resourceUri: RESULT_VIEW_URI } } });
+    const meta = toolMeta(name);
+    if (meta) tool.update({ _meta: meta });
     return tool;
   };
 
@@ -277,7 +278,13 @@ export function createServer(): McpServer {
           uri: uri.href,
           mimeType: APP_MIME_TYPE,
           text: loadView(),
-          _meta: { ui: { csp: { resourceDomains: VIEW_RESOURCE_DOMAINS, connectDomains: [] }, prefersBorder: true } },
+          _meta: {
+            ui: { csp: { resourceDomains: VIEW_RESOURCE_DOMAINS, connectDomains: [] }, prefersBorder: true },
+            // The same, in the names ChatGPT's own extensions use, for versions that read only those.
+            'openai/widgetCSP': { resource_domains: VIEW_RESOURCE_DOMAINS, connect_domains: [] },
+            'openai/widgetPrefersBorder': true,
+            'openai/widgetDescription': 'Shows the images, videos and audio of a WaveSpeed run and follows it until it finishes.',
+          },
         },
       ],
     }),
@@ -295,7 +302,7 @@ export function createServer(): McpServer {
       limit: z.number().int().min(1).max(200).default(30).describe('Max results'),
       refresh: z.boolean().default(false).describe('Bypass the 1h catalog cache'),
     },
-    { readOnlyHint: true, openWorldHint: true },
+    { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     async ({ query, type, limit, refresh }) => {
       const models = await fetchModels({ refresh });
       const q = query?.toLowerCase();
@@ -319,7 +326,7 @@ export function createServer(): McpServer {
     'get_model_schema',
     "Get a model's real input schema (required fields, properties, defaults). Call this before run_model so inputs match what the model actually accepts.",
     { model: z.string().describe('Model ID from list_models, e.g. bytedance/seedream-v5.0-pro') },
-    { readOnlyHint: true, openWorldHint: true },
+    { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     async ({ model }) => {
       const models = await fetchModels();
       const meta = models.find((m) => m.model_id === model);
@@ -567,7 +574,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool('get_balance', 'Show the WaveSpeed account credit balance, with the link to top up.', {}, { readOnlyHint: true, openWorldHint: true }, async () => {
+  server.tool('get_balance', 'Show the WaveSpeed account credit balance, with the link to top up.', {}, { readOnlyHint: true, destructiveHint: false, openWorldHint: true }, async () => {
     return ok({ ...(await fetchBalance()), top_up_url: TOP_UP_URL });
   });
 
@@ -582,7 +589,7 @@ export function createServer(): McpServer {
       since: z.string().optional().describe('Created after this time (ISO or YYYY-MM-DD)'),
       until: z.string().optional().describe('Created before this time (ISO or YYYY-MM-DD)'),
     },
-    { readOnlyHint: true, openWorldHint: true },
+    { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     async ({ page, limit, model, status, since, until }) => {
       return ok(
         await fetchHistory({
@@ -609,7 +616,7 @@ export function createServer(): McpServer {
       since: z.string().optional().describe('Records after this time (ISO or YYYY-MM-DD)'),
       until: z.string().optional().describe('Records before this time (ISO or YYYY-MM-DD)'),
     },
-    { readOnlyHint: true, openWorldHint: true },
+    { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     async ({ page, limit, type, model, key, since, until }) => {
       return ok(
         await fetchBillings({
@@ -633,7 +640,7 @@ export function createServer(): McpServer {
       until: z.string().optional().describe('End (ISO or YYYY-MM-DD); default now'),
       model: z.string().optional().describe('Filter by model uuid'),
     },
-    { readOnlyHint: true, openWorldHint: true },
+    { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     async ({ since, until, model }) => {
       const end = toIso(until, 'until') ?? new Date().toISOString();
       const start = toIso(since, 'since') ?? new Date(Date.parse(end) - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -679,7 +686,7 @@ export function createServer(): McpServer {
         .default(0)
         .describe('Max seconds to wait for a terminal status; 0 = return the current status now'),
     },
-    { readOnlyHint: true, openWorldHint: true },
+    { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     async ({ id, wait_seconds }, extra) => {
       const started = Date.now();
       const { item, done } = await waitForPrediction(id, {

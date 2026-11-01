@@ -300,13 +300,29 @@
     return said;
   }
 
+  // Ask the server for the run through the host: the standard bridge first (tools/call), then ChatGPT's own
+  // window.openai.callTool when the standard call is refused. Both answer with the tool result (ChatGPT's may come back
+  // as {structuredContent}, {content} or {result: "<json text>"}).
+  function callServerTool(name, toolArgs) {
+    return request("tools/call", { name: name, arguments: toolArgs }).catch(function (err) {
+      var o = window.openai;
+      if (!o || typeof o.callTool !== "function" || (err && err.message === "timeout")) throw err;
+      return Promise.resolve(o.callTool(name, toolArgs)).then(function (r) {
+        if (r && typeof r.result === "string" && !r.structuredContent && !r.content) {
+          try { return { structuredContent: JSON.parse(r.result) }; } catch (e) { return { content: [{ type: "text", text: r.result }] }; }
+        }
+        return r;
+      }, function () { throw err; });
+    });
+  }
+
   // Keep asking the server while the run is going: this is what turns a video's wait into a card that fills in.
   function poll(id, token) {
     var asked = 0;
     (function again() {
       if (token !== pollToken) return;
       asked++;
-      request("tools/call", { name: "get_prediction", arguments: { id: id, wait_seconds: 25 } }).then(function (res) {
+      callServerTool("get_prediction", { id: id, wait_seconds: 25 }).then(function (res) {
         if (token !== pollToken) return;
         var d = res && res.structuredContent;
         if (!d) {
