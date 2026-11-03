@@ -37,7 +37,7 @@ import {
   type LiveModel,
   type Prediction,
 } from './lib/api.js';
-import { getApiKey, getBaseUrl } from './lib/config.js';
+import { callerCacheId, getApiKey, getBaseUrl } from './lib/config.js';
 import { MAX_DELETE_IDS, prepareDelete, summarizeDelete } from './lib/delete-predictions.js';
 
 // Where to add credit; handed to the assistant next to the balance.
@@ -54,6 +54,7 @@ import {
 } from './lib/app.js';
 import { uploadWithCache } from './lib/upload-cache.js';
 import { findUnknownInputs } from './lib/validate-inputs.js';
+import { checkModelId, checkPredictionId } from './lib/ids.js';
 import { IMAGE_MODEL_KEYS, VIDEO_MODEL_KEYS } from './lib/media-models.js';
 import { planImage, planVideo, type MediaPlan, type Prop } from './lib/media-plan.js';
 
@@ -87,8 +88,9 @@ function compactModel(m: LiveModel) {
 async function uploadFile(filePath: string): Promise<{ url: string; cached: boolean }> {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No API key configured (WAVESPEED_API_KEY or `wavespeed login`).');
-  const client = new Client(apiKey, { baseUrl: getBaseUrl(), clientName: MCP_CLIENT_NAME });
-  return uploadWithCache(filePath, (p) => client.upload(p));
+  const baseUrl = getBaseUrl();
+  const client = new Client(apiKey, { baseUrl, clientName: MCP_CLIENT_NAME });
+  return uploadWithCache(filePath, callerCacheId(baseUrl, apiKey), (p) => client.upload(p));
 }
 
 // run_model submits and returns the prediction id right away (same as the
@@ -196,6 +198,7 @@ async function reportPrediction(
     status: item.status,
     done,
     outputs: item.outputs ?? [],
+    ...(item.error ? { error: item.error } : {}),
     elapsed_ms: Date.now() - started,
     ...more.waited,
     ...more.always,
@@ -366,6 +369,7 @@ export function createServer(): McpServer {
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async ({ model, input, wait_seconds }, extra) => {
+      checkModelId(model);
       const resolved = await resolveLocalFiles(input as Record<string, unknown>, {
         props: (await catalogProps(model).catch(() => null)) ?? undefined,
         upload: async (p) => (await uploadFile(p)).url,
@@ -439,11 +443,16 @@ export function createServer(): McpServer {
     return { args: { ...args, ...resolved.input }, uploaded: resolved.uploaded };
   }
 
+  // Every size any /chat image model offers; each request is fitted to its model's own list.
+  const IMAGE_RESOLUTIONS = ['0.5k', '1k', '1.5k', '2k', '4k'] as const;
   const imageShape = {
     prompt: z.string().min(1).describe('Complete visual prompt: subject, composition, style, lighting, mood.'),
     model: z.enum(IMAGE_MODEL_KEYS as [string, ...string[]]).optional().describe('Only when the user names a model; default is the first (Seedream 5 Pro).'),
-    aspect_ratio: z.string().optional().describe('e.g. 1:1, 16:9, 9:16, 4:3, 3:4; snapped to what the model supports. If omitted: text-to-image is 1:1; with input images it is determined automatically from the input image.'),
-    resolution: z.enum(['1k', '2k', '4k']).optional().describe('Only when the user asks for a size.'),
+    aspect_ratio: z.string().optional().describe('e.g. 1:1, 16:9, 9:16, 4:3, 3:4, 21:9, 9:21. The closest ratio the model supports is used; a note says when. If omitted: text-to-image is 1:1; with input images it is determined automatically from the input image.'),
+    resolution: z
+      .enum(IMAGE_RESOLUTIONS)
+      .optional()
+      .describe('Only when the user asks for a size. The closest size the model supports is used (a tie goes to the smaller one); a note says when.'),
     wait_seconds: waitSchema,
     estimate_only: estimateSchema,
   };
@@ -477,11 +486,20 @@ export function createServer(): McpServer {
     .enum(VIDEO_MODEL_KEYS as [string, ...string[]])
     .optional()
     .describe(`Only when the user names a model (${VIDEO_MODEL_KEYS.join(', ')}). Without it the default (${VIDEO_MODEL_KEYS[0]}) is used, and another model only when it cannot take the inputs.`);
+  // The union of the resolution enums of every /chat video endpoint (live catalog, 2026-11-03);
+  // each request is fitted to its endpoint's own list.
+  const VIDEO_RESOLUTIONS = ['480p', '540p', '720p', '768p', '1080p', '4k'] as const;
   const resolutionSchema = z
-    .enum(['480p', '540p', '720p', '768p', '1080p'])
+    .enum(VIDEO_RESOLUTIONS)
     .optional()
-    .describe('Only when the user asks for a resolution, or 480p for a cheaper draft; otherwise omit. MiniMax H3 defaults to 768p (its equivalent of 720p).');
-  const durationSchema = z.number().int().optional().describe('Seconds, only when the user asks for a length; omit to use the model default.');
+    .describe(
+      'Only when the user asks for a resolution, or 480p for a cheaper draft; otherwise omit. The closest resolution the model supports is used (a tie goes to the lower one); a note says when. MiniMax H3 defaults to 768p (its equivalent of 720p).',
+    );
+  const durationSchema = z
+    .number()
+    .int()
+    .optional()
+    .describe("Seconds, only when the user asks for a length; omit to use the model default. A length outside the model's range is moved into it; a note says when.");
   const VIDEO_KEYS = ['first_frame', 'last_frame', 'reference_images', 'reference_videos', 'reference_audios', 'video'];
 
   server.tool(
@@ -497,7 +515,12 @@ export function createServer(): McpServer {
       reference_audios: mediaList('Optional audio for voice, music or sound to use').optional(),
       duration: durationSchema,
       resolution: resolutionSchema,
-      aspect_ratio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']).optional().describe("If omitted, the model's default ratio is used; with first_frame the video follows that image's shape and this is ignored."),
+      aspect_ratio: z
+        .string()
+        .optional()
+        .describe(
+          "e.g. 16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 9:21. The closest ratio the model supports is used; a note says when. If omitted, the model's default ratio is used; with first_frame the video follows that image's shape and this is ignored.",
+        ),
       wait_seconds: waitSchema,
       estimate_only: estimateSchema,
     },
@@ -537,7 +560,7 @@ export function createServer(): McpServer {
       prompt: z.string().min(1).describe('What happens next.'),
       video: z.string().describe('The video to continue (URL or "@./path").'),
       last_frame: z.string().optional().describe('Optional image the continuation should end on.'),
-      duration: durationSchema.describe('Seconds of new footage; omit to use the model default.'),
+      duration: durationSchema.describe("Seconds of new footage; omit to use the model default. A length outside the model's range is moved into it; a note says when."),
       model: videoModelSchema,
       resolution: resolutionSchema,
       wait_seconds: waitSchema,
@@ -558,8 +581,11 @@ export function createServer(): McpServer {
       model: z.string().describe('Model ID from list_models'),
       input: z.record(z.unknown()).default({}).describe('Inputs the quote should account for'),
     },
+    // Not read-only, unlike the remote server's get_price: here "@./path" inputs upload local files
+    // (a write to the account's uploads) before the quote.
     { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     async ({ model, input }) => {
+      checkModelId(model);
       // Resolve @path markers exactly like run_model: some prices are measured
       // from the file itself, so quoting with the literal "@./a.mp3" string
       // would be wrong. The 24h content-hash cache means the later run reuses
@@ -611,7 +637,7 @@ export function createServer(): McpServer {
       page: z.number().int().min(1).default(1),
       limit: z.number().int().min(1).max(100).default(20).describe('Page size'),
       type: z.enum(['deduct', 'refund']).optional(),
-      model: z.string().optional().describe('Filter by model uuid'),
+      model: z.string().optional().describe('Filter by model ID as list_models returns it, e.g. bytedance/seedream-v5.0-pro'),
       key: z.string().optional().describe('Filter by the API key uuid that generated the charge'),
       since: z.string().optional().describe('Records after this time (ISO or YYYY-MM-DD)'),
       until: z.string().optional().describe('Records before this time (ISO or YYYY-MM-DD)'),
@@ -638,7 +664,7 @@ export function createServer(): McpServer {
     {
       since: z.string().optional().describe('Start (ISO or YYYY-MM-DD); default 7 days ago'),
       until: z.string().optional().describe('End (ISO or YYYY-MM-DD); default now'),
-      model: z.string().optional().describe('Filter by model uuid'),
+      model: z.string().optional().describe('Filter by model ID as list_models returns it, e.g. bytedance/seedream-v5.0-pro'),
     },
     { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     async ({ since, until, model }) => {
@@ -650,7 +676,7 @@ export function createServer(): McpServer {
 
   server.tool(
     'delete_predictions',
-    `Delete finished predictions from this account's run history, up to ${MAX_DELETE_IDS} at a time. They stop appearing in list_predictions and get_prediction, and this tool cannot bring them back. Runs that are still going are left alone, and only the key's own organization's records are deleted. Ask the user first, and pass confirm: true only after they agreed to delete these ids.`,
+    `Delete finished predictions from this account's run history, up to ${MAX_DELETE_IDS} at a time. This is a soft delete: each record stays, with status "deleted" and without its outputs, and list_predictions and get_prediction still return it that way; the output links are revoked (best effort). This tool cannot undo it. Runs that are still going are left alone, and only the key's own organization's records are deleted. Ask the user first, and pass confirm: true only after they agreed to delete these ids.`,
     {
       ids: z.array(z.string()).min(1).max(MAX_DELETE_IDS).describe('Prediction ids to delete'),
       confirm: z.boolean().describe('Must be true: the user has agreed to delete these predictions'),
@@ -687,7 +713,8 @@ export function createServer(): McpServer {
         .describe('Max seconds to wait for a terminal status; 0 = return the current status now'),
     },
     { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-    async ({ id, wait_seconds }, extra) => {
+    async ({ id: rawId, wait_seconds }, extra) => {
+      const id = checkPredictionId(rawId);
       const started = Date.now();
       const { item, done } = await waitForPrediction(id, {
         intervalMs: POLL_INTERVAL_MS,
@@ -696,7 +723,7 @@ export function createServer(): McpServer {
         signal: extra.signal,
       });
       return ok({
-        id: item.id,
+        id: item.id || id,
         model: item.model,
         status: item.status,
         done,

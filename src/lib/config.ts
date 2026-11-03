@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 
 export const DEFAULT_BASE_URL = 'https://api.wavespeed.ai';
 
@@ -61,4 +62,15 @@ export function requireApiKey(): string {
     );
   }
   return key;
+}
+
+/**
+ * Names the caller's own cache files (catalog, uploads): the first 16 hex of
+ * sha256(base_url + "\n" + api_key). The model catalog and the uploads
+ * differ per account, so two keys on one machine must not share a cache. Only
+ * the hash is ever written; the same scheme as the wavespeed CLI, which shares
+ * ~/.cache/wavespeed.
+ */
+export function callerCacheId(baseUrl: string, apiKey: string | undefined): string {
+  return crypto.createHash('sha256').update(`${baseUrl}\n${apiKey ?? ''}`).digest('hex').slice(0, 16);
 }

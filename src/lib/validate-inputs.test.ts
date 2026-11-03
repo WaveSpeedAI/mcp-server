@@ -97,6 +97,12 @@ describe('findUnknownInputs', () => {
     expect(r?.suggestions.size).toBe(0);
   });
 
+  it('always accepts the request controls the API takes for every model', () => {
+    const input = { prompt: 'x', enable_sync_mode: true, enable_base64_output: false, enable_content_filter: true };
+    expect(findUnknownInputs(input, model(['prompt']))).toBeNull();
+    expect(findUnknownInputs({ ...input, sync: true }, model(['prompt']))?.unknown).toEqual(['sync']);
+  });
+
   it('passes when every key is declared', () => {
     expect(findUnknownInputs({ prompt: 'x' }, model(['prompt']))).toBeNull();
   });

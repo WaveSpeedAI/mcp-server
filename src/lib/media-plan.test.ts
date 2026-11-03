@@ -22,32 +22,123 @@ describe('fitInput', () => {
       resolution: { type: 'string', enum: ['720p', '1080p'], default: '720p' },
       steps: nums([4, 8, 16]),
       refs: list(2),
+      style: { type: 'string', enum: ['vivid', 'natural'] },
     },
   });
+  const input = async (...a: Parameters<typeof fitInput>) => (await fitInput(...a)).input;
 
   it('drops fields the model does not take and empty values', async () => {
-    expect(await fitInput('m', { prompt: 'a', nope: 1, resolution: '', duration: undefined }, props)).toEqual({ prompt: 'a' });
+    expect(await fitInput('m', { prompt: 'a', nope: 1, resolution: '', duration: undefined }, props)).toEqual({ input: { prompt: 'a' }, notes: [] });
   });
 
-  it('snaps numbers to the nearest enum value and clamps to the range', async () => {
-    expect(await fitInput('m', { steps: 10, duration: 99 }, props)).toEqual({ steps: 8, duration: 15 });
-    expect(await fitInput('m', { duration: 1 }, props)).toEqual({ duration: 4 });
+  it('snaps numbers to the nearest enum value and clamps to the range, with a note', async () => {
+    expect(await fitInput('m', { steps: 10, duration: 99 }, props)).toEqual({
+      input: { steps: 8, duration: 15 },
+      notes: ['steps 10 is not offered by m; used 8.', 'duration 99 is not offered by m; used 15.'],
+    });
+    expect(await fitInput('m', { duration: 1 }, props)).toEqual({ input: { duration: 4 }, notes: ['duration 1 is not offered by m; used 4.'] });
+    // In range and already an integer: sent as is, no note.
+    expect(await fitInput('m', { duration: 6, steps: 8 }, props)).toEqual({ input: { duration: 6, steps: 8 }, notes: [] });
   });
 
-  it('drops a value outside a string enum', async () => {
-    expect(await fitInput('m', { resolution: '4k' }, props)).toEqual({});
+  it('drops any other value outside an enum and says the default is used', async () => {
+    expect(await fitInput('m', { style: 'neon' }, props)).toEqual({
+      input: {},
+      notes: ['style neon is not accepted by m; the model default is used.'],
+    });
   });
 
   it('cuts lists to maxItems and spells out requested defaults', async () => {
-    expect(await fitInput('m', { refs: ['a', 'b', 'c'] }, props, ['duration', 'resolution'])).toEqual({
+    expect(await input('m', { refs: ['a', 'b', 'c'] }, props, ['duration', 'resolution'])).toEqual({
       refs: ['a', 'b'],
       duration: 5,
       resolution: '720p',
     });
   });
 
+  it('adds no note for a default filled in only for display', async () => {
+    const odd = catalog({ d: { duration: { type: 'integer', minimum: 4, maximum: 15, default: 20 }, size: { type: 'string', enum: ['a'], default: 'b' } } });
+    expect(await fitInput('d', {}, odd, ['duration', 'size'])).toEqual({ input: { duration: 15 }, notes: [] });
+  });
+
   it('fails clearly when the catalog has no schema', async () => {
     await expect(fitInput('zzz', {}, props)).rejects.toThrow('No schema for zzz');
+  });
+
+  describe('size tiers', () => {
+    const tiers = catalog({
+      'bytedance/seedream-v5.0-pro': { resolution: { type: 'string', enum: ['1k', '1.5k', '2k'] } },
+      'google/nano-banana-2/text-to-image': { resolution: { type: 'string', enum: ['0.5k', '1k', '2k', '4k'] } },
+      v: { resolution: { type: 'string', enum: ['480p', '720p', '768p', '1080p', '4k'] } },
+      h3: { resolution: { type: 'string', enum: ['480p', '540p', '768p', '1080p'] } },
+      size: { size: { type: 'string', enum: ['1k', '2k'] } },
+    });
+
+    it('uses the closest tier the model offers (Seedream 5 Pro tops out at 2k)', async () => {
+      expect(await fitInput('bytedance/seedream-v5.0-pro', { resolution: '4k' }, tiers)).toEqual({
+        input: { resolution: '2k' },
+        notes: ['resolution 4k is not offered by bytedance/seedream-v5.0-pro; used 2k.'],
+      });
+      expect(await input('bytedance/seedream-v5.0-pro', { resolution: '1.2k' }, tiers)).toEqual({ resolution: '1k' });
+      expect(await input('bytedance/seedream-v5.0-pro', { resolution: '0.5k' }, tiers)).toEqual({ resolution: '1k' });
+    });
+
+    it('keeps a tier the model offers (Nano Banana 2 has 0.5k)', async () => {
+      expect(await fitInput('google/nano-banana-2/text-to-image', { resolution: '0.5k' }, tiers)).toEqual({ input: { resolution: '0.5k' }, notes: [] });
+      expect(await input('google/nano-banana-2/text-to-image', { resolution: '1.5k' }, tiers)).toEqual({ resolution: '1k' }); // tie
+    });
+
+    it('ranks p and k tiers on one scale and breaks ties toward the lower tier', async () => {
+      expect(await input('bytedance/seedream-v5.0-pro', { resolution: '1.25k' }, tiers)).toEqual({ resolution: '1k' }); // 1k vs 1.5k
+      expect(await input('v', { resolution: '744p' }, tiers)).toEqual({ resolution: '720p' }); // 720p vs 768p
+      expect(await input('v', { resolution: '2k' }, tiers)).toEqual({ resolution: '1080p' });
+      expect(await input('h3', { resolution: '720p' }, tiers)).toEqual({ resolution: '768p' });
+      expect(await input('h3', { resolution: '4k' }, tiers)).toEqual({ resolution: '1080p' });
+    });
+
+    it('treats any enum of tiers as a size, whatever the key', async () => {
+      expect(await input('size', { size: '4k' }, tiers)).toEqual({ size: '2k' });
+    });
+  });
+
+  describe('aspect ratios', () => {
+    const ratios = catalog({
+      'wavespeed-ai/minimax-h3/text-to-video': { aspect_ratio: { type: 'string', enum: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', '9:21'] } },
+      'bytedance/seedance-2.5/text-to-video': { aspect_ratio: { type: 'string', enum: ['16:9', '9:16', '4:3', '3:4', '1:1', '21:9'] } },
+      'kwaivgi/kling-v4.0/reference-to-video': { aspect_ratio: { type: 'string', enum: ['auto', '16:9', '9:16', '1:1', '21:9'] } },
+      tie: { aspect_ratio: { type: 'string', enum: ['2:1', '1:2'] } },
+    });
+
+    it('keeps 9:21 on MiniMax H3, which offers it', async () => {
+      expect(await fitInput('wavespeed-ai/minimax-h3/text-to-video', { aspect_ratio: '9:21' }, ratios)).toEqual({ input: { aspect_ratio: '9:21' }, notes: [] });
+    });
+
+    it('uses the closest ratio elsewhere, with a note', async () => {
+      expect(await fitInput('bytedance/seedance-2.5/text-to-video', { aspect_ratio: '9:21' }, ratios)).toEqual({
+        input: { aspect_ratio: '9:16' },
+        notes: ['aspect_ratio 9:21 is not offered by bytedance/seedance-2.5/text-to-video; used 9:16.'],
+      });
+      expect(await input('kwaivgi/kling-v4.0/reference-to-video', { aspect_ratio: '3:1' }, ratios)).toEqual({ aspect_ratio: '21:9' });
+    });
+
+    it('breaks a tie toward the first ratio in enum order, ignoring non-ratio members', async () => {
+      expect(await input('tie', { aspect_ratio: '1:1' }, ratios)).toEqual({ aspect_ratio: '2:1' });
+      // 4:3 is exactly as far from 1:1 as from 16:9; Kling lists 16:9 first (auto is not a ratio).
+      expect(await input('kwaivgi/kling-v4.0/reference-to-video', { aspect_ratio: '4:3' }, ratios)).toEqual({ aspect_ratio: '16:9' });
+    });
+
+    it('treats 4:3 and 3:4 around 1:1 as a tie, whatever the float error', async () => {
+      const both = catalog({ a: { aspect_ratio: { type: 'string', enum: ['4:3', '3:4'] } }, b: { aspect_ratio: { type: 'string', enum: ['3:4', '4:3'] } } });
+      expect(await input('a', { aspect_ratio: '1:1' }, both)).toEqual({ aspect_ratio: '4:3' });
+      expect(await input('b', { aspect_ratio: '1:1' }, both)).toEqual({ aspect_ratio: '3:4' });
+    });
+
+    it('drops a value that is not a ratio', async () => {
+      expect(await fitInput('bytedance/seedance-2.5/text-to-video', { aspect_ratio: 'auto' }, ratios)).toEqual({
+        input: {},
+        notes: ['aspect_ratio auto is not accepted by bytedance/seedance-2.5/text-to-video; the model default is used.'],
+      });
+    });
   });
 });
 
@@ -57,8 +148,10 @@ describe('planImage', () => {
     expect(plan.modelId).toBe('bytedance/seedream-v5.0-pro');
     expect(plan.label).toBe('Seedream 5 Pro');
     expect(plan.mode).toBe('generate');
-    // 4:3 is not in this fake schema's enum: dropped rather than sent wrong.
-    expect(plan.input).toEqual({ prompt: 'a cat' });
+    // 4:3 is not in this fake schema's enum: the closest ratio is sent, and the notes say so.
+    // 4:3 is as far from 1:1 as from 16:9; 1:1 comes first.
+    expect(plan.input).toEqual({ prompt: 'a cat', aspect_ratio: '1:1' });
+    expect(plan.notes).toEqual(['aspect_ratio 4:3 is not offered by bytedance/seedream-v5.0-pro; used 1:1.']);
   });
 
   it('sends any image to the edit endpoint, whichever list it came in', async () => {
@@ -114,6 +207,16 @@ describe('planVideo', () => {
     expect(plan.mode).toBe('text to video');
     expect(plan.input).toEqual({ prompt: 'a fox runs', duration: 5, resolution: '720p', aspect_ratio: '16:9' });
     expect(plan.notes).toEqual([]);
+  });
+
+  it('fits resolution, ratio and duration to the model and adds each change to the notes', async () => {
+    const plan = await planVideo({ prompt: 'p', resolution: '4k', aspect_ratio: '9:21', duration: 40 }, 'generate', VIDEO_CATALOG);
+    expect(plan.input).toMatchObject({ resolution: '1080p', aspect_ratio: '9:16', duration: 15 });
+    expect(plan.notes).toEqual([
+      'resolution 4k is not offered by bytedance/seedance-2.5/text-to-video; used 1080p.',
+      'duration 40 is not offered by bytedance/seedance-2.5/text-to-video; used 15.',
+      'aspect_ratio 9:21 is not offered by bytedance/seedance-2.5/text-to-video; used 9:16.',
+    ]);
   });
 
   it('animates a first frame and leaves aspect_ratio to the frame', async () => {

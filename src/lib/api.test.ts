@@ -1,4 +1,8 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { callerCacheId } from './config.js';
 import {
   clientAttributionHeaders,
   waitForPrediction,
@@ -8,6 +12,7 @@ import {
   fetchUsageStats,
   deletePredictions,
   modelPlaygroundUrl,
+  fetchModels,
 } from './api.js';
 
 const ORIGINAL_ENV = process.env.WAVESPEED_CLIENT_NAME;
@@ -65,6 +70,32 @@ describe('waitForPrediction', () => {
     serve(['processing', 'failed']);
     const r = await waitForPrediction('p1', { intervalMs: 1, timeoutMs: 1000 });
     expect(r).toMatchObject({ done: true, item: { status: 'failed', error: 'boom' } });
+  });
+
+  it('treats an empty or unknown status as final and keeps the error (archived outputs)', async () => {
+    vi.stubEnv('WAVESPEED_API_KEY', 'test');
+    const bodies = [
+      { id: 'p1', model: 'm', status: '', outputs: [], error: 'The outputs of this prediction have expired.' },
+      { id: '', model: '', status: '', outputs: [] },
+      { id: 'p1', status: 'archived' },
+    ];
+    for (const data of bodies) {
+      let calls = 0;
+      globalThis.fetch = vi.fn(async () => {
+        calls++;
+        return new Response(JSON.stringify({ code: 200, data }));
+      }) as typeof fetch;
+      const r = await waitForPrediction('p1', { intervalMs: 1, timeoutMs: 1000 });
+      expect(r.done).toBe(true);
+      expect(r.item).toEqual(data);
+      expect(calls).toBe(1);
+    }
+  });
+
+  it('keeps waiting only while created or processing', async () => {
+    serve(['created', 'processing', 'completed']);
+    const r = await waitForPrediction('p1', { intervalMs: 1, timeoutMs: 1000 });
+    expect(r).toMatchObject({ done: true, item: { status: 'completed' } });
   });
 
   it('stops early when the request is aborted', async () => {
@@ -224,5 +255,38 @@ describe('modelPlaygroundUrl', () => {
     expect(modelPlaygroundUrl('google/nano-banana-2.1/edit')).toBe(
       'https://wavespeed.ai/models/google/nano-banana-2.1/edit',
     );
+  });
+});
+
+describe('catalog cache', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.unstubAllEnvs();
+  });
+
+  it('keeps one file per base URL + API key and never writes the key', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-mcp-home-'));
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('WAVESPEED_BASE_URL', 'https://api.test');
+    let calls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      calls++;
+      return new Response(JSON.stringify({ code: 200, data: [{ model_id: `m${calls}`, name: 'm' }] }));
+    }) as typeof fetch;
+
+    vi.stubEnv('WAVESPEED_API_KEY', 'secret-key-a');
+    expect((await fetchModels())[0].model_id).toBe('m1');
+    vi.stubEnv('WAVESPEED_API_KEY', 'secret-key-b');
+    // Another key does not see the first key's catalog, in memory or on disk.
+    expect((await fetchModels())[0].model_id).toBe('m2');
+
+    const dir = path.join(home, '.cache', 'wavespeed');
+    const files = fs.readdirSync(dir).sort();
+    expect(files).toEqual(
+      [`models-${callerCacheId('https://api.test', 'secret-key-a')}.json`, `models-${callerCacheId('https://api.test', 'secret-key-b')}.json`].sort(),
+    );
+    for (const f of files) expect(fs.readFileSync(path.join(dir, f), 'utf8')).not.toContain('secret-key');
+    fs.rmSync(home, { recursive: true, force: true });
   });
 });

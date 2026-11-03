@@ -20,22 +20,25 @@ interface CacheEntry {
   uploaded_at: number;
 }
 
-function cacheFile(): string {
-  return path.join(os.homedir(), '.cache', 'wavespeed', 'uploads.json');
+// One file per caller (callerCacheId: a hash of base URL + API key, never the
+// key itself): an upload belongs to the account that made it, so another key
+// on the same machine must not reuse it.
+export function uploadCacheFile(cacheId: string): string {
+  return path.join(os.homedir(), '.cache', 'wavespeed', `uploads-${cacheId}.json`);
 }
 
-function readCache(): Record<string, CacheEntry> {
+function readCache(cacheId: string): Record<string, CacheEntry> {
   try {
-    return JSON.parse(fs.readFileSync(cacheFile(), 'utf8'));
+    return JSON.parse(fs.readFileSync(uploadCacheFile(cacheId), 'utf8'));
   } catch {
     return {};
   }
 }
 
-function writeCache(entries: Record<string, CacheEntry>): void {
+function writeCache(cacheId: string, entries: Record<string, CacheEntry>): void {
   try {
-    fs.mkdirSync(path.dirname(cacheFile()), { recursive: true });
-    fs.writeFileSync(cacheFile(), JSON.stringify(entries));
+    fs.mkdirSync(path.dirname(uploadCacheFile(cacheId)), { recursive: true });
+    fs.writeFileSync(uploadCacheFile(cacheId), JSON.stringify(entries));
   } catch {
     /* best-effort; a failed cache write must never fail the upload */
   }
@@ -46,15 +49,17 @@ export function hashFile(filePath: string): string {
 }
 
 /**
- * Upload through `doUpload` unless the identical bytes already went up within
- * the TTL. Returns the hosted URL either way.
+ * Upload through `doUpload` unless the identical bytes already went up for
+ * this caller (`cacheId`, see callerCacheId) within the TTL. Returns the
+ * hosted URL either way.
  */
 export async function uploadWithCache(
   filePath: string,
+  cacheId: string,
   doUpload: (p: string) => Promise<string>,
 ): Promise<{ url: string; cached: boolean }> {
   const key = hashFile(filePath);
-  const entries = readCache();
+  const entries = readCache(cacheId);
   const hit = entries[key];
   if (hit && Date.now() - hit.uploaded_at < TTL_MS) {
     return { url: hit.url, cached: true };
@@ -65,6 +70,6 @@ export async function uploadWithCache(
   for (const [k, v] of Object.entries(entries)) {
     if (Date.now() - v.uploaded_at >= TTL_MS) delete entries[k];
   }
-  writeCache(entries);
+  writeCache(cacheId, entries);
   return { url, cached: false };
 }

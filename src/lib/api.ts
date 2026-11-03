@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
-import { getApiKey, getBaseUrl } from './config.js';
+import { callerCacheId, getApiKey, getBaseUrl } from './config.js';
 
 const require = createRequire(import.meta.url);
 const { version: PKG_VERSION } = require('../../package.json') as { version: string };
@@ -55,8 +55,9 @@ interface Envelope<T> {
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-function cachePath(): string {
-  return path.join(os.homedir(), '.cache', 'wavespeed', 'models.json');
+// One file per base URL + API key: the catalog differs per caller.
+function cachePath(cacheId: string): string {
+  return path.join(os.homedir(), '.cache', 'wavespeed', `models-${cacheId}.json`);
 }
 
 interface CacheFile {
@@ -65,9 +66,9 @@ interface CacheFile {
   models: LiveModel[];
 }
 
-function readCache(baseUrl: string): CacheFile | null {
+function readCache(baseUrl: string, cacheId: string): CacheFile | null {
   try {
-    const parsed = JSON.parse(fs.readFileSync(cachePath(), 'utf8')) as CacheFile;
+    const parsed = JSON.parse(fs.readFileSync(cachePath(cacheId), 'utf8')) as CacheFile;
     if (parsed.base_url !== baseUrl) return null;
     if (Date.now() - parsed.fetched_at > CACHE_TTL_MS) return null;
     return parsed;
@@ -76,11 +77,11 @@ function readCache(baseUrl: string): CacheFile | null {
   }
 }
 
-function writeCache(baseUrl: string, models: LiveModel[]): void {
+function writeCache(baseUrl: string, cacheId: string, models: LiveModel[]): void {
   try {
-    fs.mkdirSync(path.dirname(cachePath()), { recursive: true });
+    fs.mkdirSync(path.dirname(cachePath(cacheId)), { recursive: true });
     const body: CacheFile = { fetched_at: Date.now(), base_url: baseUrl, models };
-    fs.writeFileSync(cachePath(), JSON.stringify(body));
+    fs.writeFileSync(cachePath(cacheId), JSON.stringify(body));
   } catch {
     /* best-effort cache; ignore failures */
   }
@@ -180,27 +181,28 @@ async function apiPost<T>(apiPath: string, body: unknown, opts: { timeoutMs?: nu
 // The server is a long-lived process, so keep the parsed catalog in memory
 // instead of re-reading the ~2MB disk cache on every tool call. Same 1h TTL;
 // the disk cache still lets a fresh process start without a network fetch.
-let memCache: { baseUrl: string; fetchedAt: number; models: LiveModel[] } | null = null;
+let memCache: { cacheId: string; fetchedAt: number; models: LiveModel[] } | null = null;
 
 export async function fetchModels(opts: { refresh?: boolean } = {}): Promise<LiveModel[]> {
   const baseUrl = getBaseUrl();
+  const cacheId = callerCacheId(baseUrl, getApiKey());
   if (!opts.refresh) {
     if (
       memCache &&
-      memCache.baseUrl === baseUrl &&
+      memCache.cacheId === cacheId &&
       Date.now() - memCache.fetchedAt <= CACHE_TTL_MS
     ) {
       return memCache.models;
     }
-    const cached = readCache(baseUrl);
+    const cached = readCache(baseUrl, cacheId);
     if (cached) {
-      memCache = { baseUrl, fetchedAt: cached.fetched_at, models: cached.models };
+      memCache = { cacheId, fetchedAt: cached.fetched_at, models: cached.models };
       return cached.models;
     }
   }
   const models = await apiGet<LiveModel[]>('/api/v3/models');
-  writeCache(baseUrl, models);
-  memCache = { baseUrl, fetchedAt: Date.now(), models };
+  writeCache(baseUrl, cacheId, models);
+  memCache = { cacheId, fetchedAt: Date.now(), models };
   return models;
 }
 
@@ -326,9 +328,20 @@ export async function fetchPrediction(
 
 export const TERMINAL_FAILURES = ['failed', 'cancelled', 'timeout', 'deleted'];
 
+// The only statuses of a run that is still going. Anything else is final:
+// completed, a failure, or a status this client does not know — including the
+// empty status of a row whose outputs were archived (the API then sends empty
+// outputs and an error saying they expired). Waiting on those would never end.
+export const PENDING_STATUSES = ['created', 'processing'];
+
+export function isPending(status: string | undefined): boolean {
+  return PENDING_STATUSES.includes(status ?? '');
+}
+
 /**
- * Poll a prediction until it reaches a terminal status (done=true, whether
- * completed or failed — the caller decides what a failure means) or the wait
+ * Poll a prediction until it is no longer pending (done=true, whether
+ * completed, failed or an unknown/empty status — the caller decides what it
+ * means, and gets the API's error with it) or the wait
  * budget runs out. Running out is NOT an error: generations can take hours,
  * so the caller gets the still-running prediction back (done=false) and
  * reports its id instead of losing it in a thrown message. `onTick` fires
@@ -348,9 +361,7 @@ export async function waitForPrediction(
   const deadline = opts.timeoutMs !== undefined ? Date.now() + opts.timeoutMs : undefined;
   for (;;) {
     const item = await fetchPrediction(id, { retryDelayMs: opts.retryDelayMs });
-    if (item.status === 'completed' || TERMINAL_FAILURES.includes(item.status)) {
-      return { item, done: true };
-    }
+    if (!isPending(item.status)) return { item, done: true };
     await opts.onTick?.(item);
     if (opts.signal?.aborted) return { item, done: false };
     if (deadline !== undefined && Date.now() + interval > deadline) return { item, done: false };

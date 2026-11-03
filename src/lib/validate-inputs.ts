@@ -78,6 +78,14 @@ function closest(key: string, known: string[]): string | undefined {
 }
 
 /**
+ * Request controls the API accepts for every model without any schema
+ * declaring them (api-server pkg/openapi/validate.go publicInputControlProperties
+ * and the enable_content_filter opt-in in handler/model_run.go). They are never
+ * unknown inputs.
+ */
+export const GLOBAL_INPUT_CONTROLS: readonly string[] = ['enable_sync_mode', 'enable_base64_output', 'enable_content_filter'];
+
+/**
  * Compare top-level input keys with the schema's properties.
  * Returns null when everything checks out or no schema is available.
  */
@@ -89,7 +97,7 @@ export function findUnknownInputs(
   if (!known) return null;
   const knownSet = new Set(known);
   const aliases = requestSchemaAliases(model);
-  const unknown = Object.keys(input).filter((k) => !knownSet.has(k) && !aliases.has(k));
+  const unknown = Object.keys(input).filter((k) => !knownSet.has(k) && !aliases.has(k) && !GLOBAL_INPUT_CONTROLS.includes(k));
   if (unknown.length === 0) return null;
   const suggestions = new Map<string, string>();
   for (const k of unknown) {
