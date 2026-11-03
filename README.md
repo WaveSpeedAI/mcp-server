@@ -72,6 +72,19 @@ https://api.wavespeed.ai/mcp
     </picture>
   </a>
 - **VS Code:** `code --add-mcp '{"name":"wavespeed","type":"http","url":"https://api.wavespeed.ai/mcp"}'`
+- **Clients that only start local commands:** connect through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), which opens the same browser approval on first start:
+
+  ```json
+  {
+    "mcpServers": {
+      "wavespeed": {
+        "command": "npx",
+        "args": ["-y", "mcp-remote", "https://api.wavespeed.ai/mcp"]
+      }
+    }
+  }
+  ```
+
 - **Any other client that sends request headers:** point it at the URL with `Authorization: Bearer <your API key>`.
 
 The hosted server has the same tools, with one difference for files: it cannot read files on your computer, so pass public URLs, use `create_upload` from a tool that can send HTTP requests (it returns a temporary upload address and the `download_url` to use as an input), or, in ChatGPT, attach the file to the chat (the `upload_attachment` tool, which only ChatGPT can fill, imports it and returns a `download_url`). Full guide: [wavespeed.ai/docs/mcp](https://wavespeed.ai/docs/mcp).
