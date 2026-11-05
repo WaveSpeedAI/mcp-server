@@ -9,10 +9,10 @@
 
 # WaveSpeed MCP Server
 
-<a href="https://cursor.com/install-mcp?name=wavespeed&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkB3YXZlc3BlZWQvbWNwIl0sImVudiI6eyJXQVZFU1BFRURfQVBJX0tFWSI6Indza18uLi4ifX0%3D">
+<a href="https://cursor.com/install-mcp?name=wavespeed&config=eyJ1cmwiOiJodHRwczovL2FwaS53YXZlc3BlZWQuYWkvbWNwIn0%3D">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://cursor.com/deeplink/mcp-install-light.svg">
-    <img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Add wavespeed MCP server to Cursor" height="32"/>
+    <img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Add the hosted wavespeed MCP server to Cursor" height="32"/>
   </picture>
 </a>
 
