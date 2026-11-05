@@ -14,13 +14,15 @@ describe('media models', () => {
   it('defaults to the first model of each kind, as /chat does', () => {
     expect(DEFAULT_IMAGE_MODEL).toBe('seedream-5-pro');
     expect(DEFAULT_VIDEO_MODEL).toBe('seedance-2.5');
-    expect(IMAGE_MODEL_KEYS).toEqual(['seedream-5-pro', 'nano-banana-2.1', 'nano-banana-2', 'nano-banana-pro', 'gpt-image-2.5', 'gpt-image-2']);
+    expect(IMAGE_MODEL_KEYS).toEqual(['seedream-5-pro', 'nano-banana-2.1', 'nano-banana-2', 'nano-banana-pro', 'gpt-image-2.6', 'gpt-image-2.5', 'gpt-image-2']);
     expect(VIDEO_MODEL_KEYS).toHaveLength(11);
   });
 
   it('names the endpoints each model runs on', () => {
     expect(IMAGE_MODELS['seedream-5-pro'].generate).toBe('bytedance/seedream-v5.0-pro');
     expect(IMAGE_MODELS['seedream-5-pro'].edit).toBe('bytedance/seedream-v5.0-pro/edit');
+    expect(IMAGE_MODELS['gpt-image-2.6'].generate).toBe('openai/gpt-image-2.6-sunburst/text-to-image');
+    expect(IMAGE_MODELS['gpt-image-2.6'].edit).toBe('openai/gpt-image-2.6-sunburst/edit');
     expect(IMAGE_MODELS['gpt-image-2.5'].generate).toBe('openai/gpt-image-2.5-sunburst/text-to-image');
     expect(videoEndpoints(VIDEO_MODELS['seedance-2.5-turbo'])).toEqual({
       text: 'bytedance/seedance-2.5/text-to-video-turbo',

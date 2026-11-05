@@ -1,6 +1,6 @@
 // The image and video models the dedicated generate/edit tools offer: the
 // same list, in the same order, as the WaveSpeed /chat page (api-dashboard
-// lib/media-models.ts, checked 2026-10-26). The first of each is the default.
+// lib/media-models.ts, checked 2026-11-05). The first of each is the default.
 // This is a vendored copy: when /chat changes its models, change this file and
 // its test (src/lib/media-models.test.ts) with it. Capabilities mirror the
 // endpoints' input schemas; the tools still fit every request to the live
@@ -9,7 +9,7 @@
 
 // ------------------------------------------------------------------ images
 
-export type ImageModelKey = 'seedream-5-pro' | 'nano-banana-2.1' | 'nano-banana-2' | 'nano-banana-pro' | 'gpt-image-2.5' | 'gpt-image-2'
+export type ImageModelKey = 'seedream-5-pro' | 'nano-banana-2.1' | 'nano-banana-2' | 'nano-banana-pro' | 'gpt-image-2.6' | 'gpt-image-2.5' | 'gpt-image-2'
 
 export type ImageModel = {
   id: ImageModelKey
@@ -36,6 +36,7 @@ export const IMAGE_MODELS: Record<ImageModelKey, ImageModel> = {
   'nano-banana-2.1': image('nano-banana-2.1', 'Nano Banana 2.1', 'google/nano-banana-2.1', 'text-to-image', ['1k', '2k', '4k'], NANO_BANANA_2_RATIOS, 14),
   'nano-banana-2': image('nano-banana-2', 'Nano Banana 2', 'google/nano-banana-2', 'text-to-image', ['0.5k', '1k', '2k', '4k'], NANO_BANANA_2_RATIOS, 14),
   'nano-banana-pro': image('nano-banana-pro', 'Nano Banana Pro', 'google/nano-banana-pro', 'text-to-image', ['1k', '2k', '4k'], NANO_BANANA_RATIOS, 14),
+  'gpt-image-2.6': image('gpt-image-2.6', 'GPT Image 2.6', 'openai/gpt-image-2.6-sunburst', 'text-to-image', ['1k', '2k', '4k'], WIDE_RATIOS, 16),
   'gpt-image-2.5': image('gpt-image-2.5', 'GPT Image 2.5', 'openai/gpt-image-2.5-sunburst', 'text-to-image', ['1k', '2k', '4k'], WIDE_RATIOS, 16),
   'gpt-image-2': image('gpt-image-2', 'GPT Image 2', 'openai/gpt-image-2', 'text-to-image', ['1k', '2k', '4k'], WIDE_RATIOS, 16),
 }
