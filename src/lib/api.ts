@@ -276,7 +276,7 @@ export async function fetchPricing(
   inputs: Record<string, unknown>,
 ): Promise<ModelPrice> {
   // /model/price is the documented pricing endpoint.
-  return apiPost('/api/v3/model/price', { model_id: modelId, inputs });
+  return apiPost('/api/v3/model/price', { model_id: modelId, input: inputs });
 }
 
 export interface Prediction {
