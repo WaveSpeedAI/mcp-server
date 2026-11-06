@@ -138,7 +138,11 @@ function progressTicker(extra: ToolExtra, id: string, startedAt: number) {
 // catch an invented parameter. Fails open when no schema is available, and
 // re-fetches the catalog once before rejecting so a stale cache can't block
 // a valid input.
-async function assertKnownInputs(model: string, input: Record<string, unknown>): Promise<void> {
+async function assertKnownInputs(
+  model: string,
+  input: Record<string, unknown>,
+  consequence = 'and still bills the run, so nothing was submitted',
+): Promise<void> {
   let report;
   try {
     report = findUnknownInputs(input, (await fetchModels()).find((m) => m.model_id === model));
@@ -156,7 +160,7 @@ async function assertKnownInputs(model: string, input: Record<string, unknown>):
   });
   throw new Error(
     `Model ${model} does not accept: ${hints.join(', ')}. The API silently drops unknown ` +
-      `inputs and still bills the run, so nothing was submitted. Accepted inputs: ` +
+      `inputs ${consequence}. Accepted inputs: ` +
       `${report.known.join(', ')}. See get_model_schema.`,
   );
 }
@@ -602,7 +606,7 @@ export function createServer(): McpServer {
       });
       const priceInput = resolved.input;
       // Same guard as run_model: a key the model does not declare is dropped by the API and the quote ignores it.
-      await assertKnownInputs(model, priceInput);
+      await assertKnownInputs(model, priceInput, 'so the quote would not account for them');
       const data = await fetchPricing(model, priceInput);
       return ok({ ...data, estimate: true, disclaimer: PRICE_DISCLAIMER, playground_url: modelPlaygroundUrl(model) });
     },
