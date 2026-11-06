@@ -49,3 +49,23 @@ describe('result card', () => {
     await client.close();
   });
 });
+
+describe('tool arguments', () => {
+  it('refuses a name the tool does not declare instead of dropping it', async () => {
+    const server = createServer();
+    const client = new Client({ name: 't', version: '0' });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(a), client.connect(b)]);
+
+    // "inputs" for "input" used to be stripped, quoting the model with no inputs (2026-11-06).
+    const r: any = await client.callTool({ name: 'get_price', arguments: { model: 'acme/vid', inputs: { duration: 15 } } });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain('Unknown argument for get_price. It accepts: input, model.');
+
+    const { tools } = await client.listTools();
+    // Every tool with arguments says so in the schema it publishes; a tool without any has nothing to misspell.
+    for (const t of tools.filter((t) => Object.keys((t.inputSchema as any).properties ?? {}).length > 0)) {
+      expect((t.inputSchema as any).additionalProperties, t.name).toBe(false);
+    }
+  });
+});
