@@ -262,12 +262,6 @@ export function createServer(): McpServer {
       }
     };
     const tool = registerTool(...args);
-    // Refuse an argument the tool does not declare. zod objects strip unknown keys by default, so a misspelt
-    // name ("inputs" for get_price's "input") ran as if left out and quoted the model with no inputs at all.
-    if (typeof tool.inputSchema?.strict === 'function') {
-      const accepted = Object.keys(tool.inputSchema.shape ?? {}).sort().join(', ') || 'none';
-      tool.inputSchema = tool.inputSchema.strict(`Unknown argument for ${name}. It accepts: ${accepted}.`);
-    }
     const meta = toolMeta(name);
     if (meta) tool.update({ _meta: meta });
     return tool;
@@ -601,8 +595,6 @@ export function createServer(): McpServer {
         upload: async (p) => (await uploadFile(p)).url,
       });
       const priceInput = resolved.input;
-      // Same guard as run_model: a key the model does not declare is dropped by the API and the quote ignores it.
-      await assertKnownInputs(model, priceInput);
       const data = await fetchPricing(model, priceInput);
       return ok({ ...data, estimate: true, disclaimer: PRICE_DISCLAIMER, playground_url: modelPlaygroundUrl(model) });
     },
