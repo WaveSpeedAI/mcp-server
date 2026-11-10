@@ -1,6 +1,6 @@
 // The image and video models the dedicated generate/edit tools offer: the
 // same list, in the same order, as the WaveSpeed /chat page (api-dashboard
-// lib/media-models.ts, checked 2026-11-05). The first of each is the default.
+// lib/media-models.ts, checked 2026-11-10). The first of each is the default.
 // This is a vendored copy: when /chat changes its models, change this file and
 // its test (src/lib/media-models.test.ts) with it. Capabilities mirror the
 // endpoints' input schemas; the tools still fit every request to the live
@@ -9,7 +9,7 @@
 
 // ------------------------------------------------------------------ images
 
-export type ImageModelKey = 'seedream-5-pro' | 'nano-banana-2.1' | 'nano-banana-2' | 'nano-banana-pro' | 'gpt-image-2.6' | 'gpt-image-2.5' | 'gpt-image-2'
+export type ImageModelKey = 'seedream-5-5' | 'seedream-5-pro' | 'nano-banana-2.1' | 'nano-banana-2' | 'nano-banana-pro' | 'gpt-image-2.6' | 'gpt-image-2.5' | 'gpt-image-2'
 
 export type ImageModel = {
   id: ImageModelKey
@@ -32,6 +32,7 @@ const image = (id: ImageModelKey, label: string, base: string, generate: string,
 
 /** In menu order; the first is the default. */
 export const IMAGE_MODELS: Record<ImageModelKey, ImageModel> = {
+  'seedream-5-5': image('seedream-5-5', 'Seedream 5.5', 'bytedance/seedream-v5.5', '', ['1k', '1.5k', '2k'], WIDE_RATIOS, 10),
   'seedream-5-pro': image('seedream-5-pro', 'Seedream 5 Pro', 'bytedance/seedream-v5.0-pro', '', ['1k', '1.5k', '2k'], WIDE_RATIOS, 10),
   'nano-banana-2.1': image('nano-banana-2.1', 'Nano Banana 2.1', 'google/nano-banana-2.1', 'text-to-image', ['1k', '2k', '4k'], NANO_BANANA_2_RATIOS, 14),
   'nano-banana-2': image('nano-banana-2', 'Nano Banana 2', 'google/nano-banana-2', 'text-to-image', ['0.5k', '1k', '2k', '4k'], NANO_BANANA_2_RATIOS, 14),

@@ -457,7 +457,7 @@ export function createServer(): McpServer {
   const IMAGE_RESOLUTIONS = ['0.5k', '1k', '1.5k', '2k', '4k'] as const;
   const imageShape = {
     prompt: z.string().min(1).describe('Complete visual prompt: subject, composition, style, lighting, mood.'),
-    model: z.enum(IMAGE_MODEL_KEYS as [string, ...string[]]).optional().describe('Only when the user names a model; default is the first (Seedream 5 Pro).'),
+    model: z.enum(IMAGE_MODEL_KEYS as [string, ...string[]]).optional().describe('Only when the user names a model; default is the first (Seedream 5.5).'),
     aspect_ratio: z.string().optional().describe('e.g. 1:1, 16:9, 9:16, 4:3, 3:4, 21:9, 9:21. The closest ratio the model supports is used; a note says when. If omitted: text-to-image is 1:1; with input images it is determined automatically from the input image.'),
     resolution: z
       .enum(IMAGE_RESOLUTIONS)

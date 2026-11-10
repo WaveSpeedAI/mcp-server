@@ -34,7 +34,7 @@ Built on the same design as the open-source [`@wavespeed/cli`](https://github.co
 | `list_models` | Search the live catalog by text or modality type |
 | `get_model_schema` | A model's real input schema (required, properties, defaults), with a link to the model's playground page |
 | `run_model` | Submit + wait; rejects input keys the model doesn't accept; `@path` inputs upload automatically; returns output URLs |
-| `generate_image` | Image from a prompt with the /chat image models (default Seedream 5 Pro); reference images use the model's edit endpoint |
+| `generate_image` | Image from a prompt with the /chat image models (default Seedream 5.5); reference images use the model's edit endpoint |
 | `edit_image` | Edit, restyle or combine existing images with the same models |
 | `generate_video` | Video from a prompt, a first/last frame or reference images/videos/audio, with the /chat video models (default Seedance 2.5); the mode (text, image, reference) is picked from the inputs |
 | `edit_video` | Edit an existing video, optionally with reference images/audio |

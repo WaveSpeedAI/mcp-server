@@ -9,6 +9,8 @@ const nums = (values: number[]): Prop => ({ type: 'integer', enum: values });
 const catalog = (schemas: Record<string, Record<string, Prop>>): PropsOf => async (id) => schemas[id] ?? null;
 
 const IMAGE_CATALOG = catalog({
+  'bytedance/seedream-v5.5': { prompt: str, aspect_ratio: { type: 'string', enum: ['1:1', '16:9', '9:16'] }, resolution: { type: 'string', enum: ['1k', '2k'] } },
+  'bytedance/seedream-v5.5/edit': { prompt: str, images: list(10), aspect_ratio: str, resolution: str },
   'bytedance/seedream-v5.0-pro': { prompt: str, aspect_ratio: { type: 'string', enum: ['1:1', '16:9', '9:16'] }, resolution: { type: 'string', enum: ['1k', '2k'] } },
   'bytedance/seedream-v5.0-pro/edit': { prompt: str, images: list(10), aspect_ratio: str, resolution: str },
   'google/nano-banana-2.1/text-to-image': { prompt: str },
@@ -145,18 +147,18 @@ describe('fitInput', () => {
 describe('planImage', () => {
   it('uses the default model, text to image, when no image is given', async () => {
     const plan = await planImage({ prompt: 'a cat', aspect_ratio: '4:3' }, IMAGE_CATALOG);
-    expect(plan.modelId).toBe('bytedance/seedream-v5.0-pro');
-    expect(plan.label).toBe('Seedream 5 Pro');
+    expect(plan.modelId).toBe('bytedance/seedream-v5.5');
+    expect(plan.label).toBe('Seedream 5.5');
     expect(plan.mode).toBe('generate');
     // 4:3 is not in this fake schema's enum: the closest ratio is sent, and the notes say so.
     // 4:3 is as far from 1:1 as from 16:9; 1:1 comes first.
     expect(plan.input).toEqual({ prompt: 'a cat', aspect_ratio: '1:1' });
-    expect(plan.notes).toEqual(['aspect_ratio 4:3 is not offered by bytedance/seedream-v5.0-pro; used 1:1.']);
+    expect(plan.notes).toEqual(['aspect_ratio 4:3 is not offered by bytedance/seedream-v5.5; used 1:1.']);
   });
 
   it('sends any image to the edit endpoint, whichever list it came in', async () => {
     const plan = await planImage({ prompt: 'make @image 1 a watercolor', images: ['https://x/a.png'], reference_images: ['https://x/b.png'] }, IMAGE_CATALOG);
-    expect(plan.modelId).toBe('bytedance/seedream-v5.0-pro/edit');
+    expect(plan.modelId).toBe('bytedance/seedream-v5.5/edit');
     expect(plan.mode).toBe('edit');
     expect(plan.input.images).toEqual(['https://x/a.png', 'https://x/b.png']);
     expect(plan.input.prompt).toBe('make Image 1 a watercolor');
