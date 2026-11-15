@@ -263,7 +263,16 @@ export async function planVideo(args: VideoArgs, action: VideoAction, propsOf: P
 
   const pinned = args.model !== undefined && args.model !== '';
   const first = videoModelKey(args.model);
-  const keys = pinned ? [first] : [first, ...VIDEO_MODEL_KEYS.filter((k) => k !== first)];
+  // The default is the cheapest tier and takes the fewest inputs (Seedance 2.5 Flash: 480p / 720p, 10 images). When the
+  // caller asked for more than it offers, move on to the next model instead of trimming the request to fit.
+  const limits = VIDEO_MODELS[first];
+  const exceeds =
+    (args.resolution != null && args.resolution !== '' && !limits.resolutions.includes(args.resolution)) ||
+    (args.reference_images?.length ?? 0) > limits.maxRefs.images ||
+    (args.reference_videos?.length ?? 0) > limits.maxRefs.videos ||
+    (args.reference_audios?.length ?? 0) > limits.maxRefs.audios;
+  const ordered = pinned ? [first] : [first, ...VIDEO_MODEL_KEYS.filter((k) => k !== first)];
+  const keys = !pinned && first === DEFAULT_VIDEO_MODEL && exceeds ? ordered.slice(1) : ordered;
 
   interface Candidate { key: VideoModelKey; mode: Mode; wanted: Record<string, unknown>; lost: string[] }
   const candidates: Candidate[] = [];

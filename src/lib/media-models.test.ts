@@ -13,9 +13,10 @@ import {
 describe('media models', () => {
   it('defaults to the first model of each kind, as /chat does', () => {
     expect(DEFAULT_IMAGE_MODEL).toBe('seedream-5-5');
-    expect(DEFAULT_VIDEO_MODEL).toBe('seedance-2.5');
+    expect(DEFAULT_VIDEO_MODEL).toBe('seedance-2.5-flash');
     expect(IMAGE_MODEL_KEYS).toEqual(['seedream-5-5', 'seedream-5-pro', 'nano-banana-2.1', 'nano-banana-2', 'nano-banana-pro', 'gpt-image-2.6', 'gpt-image-2.5', 'gpt-image-2']);
-    expect(VIDEO_MODEL_KEYS).toHaveLength(11);
+    expect(VIDEO_MODEL_KEYS).toHaveLength(12);
+    expect(VIDEO_MODEL_KEYS.slice(0, 3)).toEqual(['seedance-2.5-flash', 'seedance-2.5', 'seedance-2.5-turbo']);
   });
 
   it('names the endpoints each model runs on', () => {
@@ -31,6 +32,13 @@ describe('media models', () => {
       image: 'bytedance/seedance-2.5/image-to-video-turbo',
       reference: 'bytedance/seedance-2.5/reference-to-video-turbo',
       edit: 'bytedance/seedance-2.5/video-edit-turbo',
+    });
+    // Flash has its own endpoint prefix and neither a turbo tier nor an extend endpoint.
+    expect(videoEndpoints(VIDEO_MODELS['seedance-2.5-flash'])).toEqual({
+      text: 'bytedance/seedance-2.5-flash/text-to-video',
+      image: 'bytedance/seedance-2.5-flash/image-to-video',
+      reference: 'bytedance/seedance-2.5-flash/reference-to-video',
+      edit: 'bytedance/seedance-2.5-flash/video-edit',
     });
     expect(videoEndpoints(VIDEO_MODELS['minimax-h3']).reference).toBe('wavespeed-ai/minimax-h3/reference-to-video');
     expect(videoEndpoints(VIDEO_MODELS['seedance-2.0']).reference).toBe('bytedance/seedance-2.0/reference-to-video');
