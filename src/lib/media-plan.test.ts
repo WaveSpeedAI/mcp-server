@@ -186,19 +186,22 @@ const video = (extra: Record<string, Prop> = {}): Record<string, Prop> => ({
   ...extra,
 });
 
-const flash = (extra: Record<string, Prop> = {}): Record<string, Prop> => ({
+const flash = (extra: Record<string, Prop> = {}, resolutions = ['480p', '720p', '1080p', '4k']): Record<string, Prop> => ({
   ...video(extra),
   duration: { type: 'integer', minimum: 4, maximum: 30, default: 5 },
-  resolution: { type: 'string', enum: ['480p', '720p'], default: '720p' },
+  resolution: { type: 'string', enum: resolutions, default: '720p' },
 });
+const flashTurbo = (extra: Record<string, Prop> = {}) => flash(extra, ['720p', '1080p']);
 
 const VIDEO_CATALOG = catalog({
-  // Seedance 2.5 Flash: 480p / 720p, 10 images, 5 videos; no extend endpoint. (Like the fixture's Seedance it takes no audio
+  // Seedance 2.5 Flash: 480p to 4k (1080p / 4k upscaled), 10 images, 5 videos; no extend endpoint; a turbo tier at 720p / 1080p. (Like the fixture's Seedance it takes no audio
   // references here, so audio still moves to another model; the live schema does take them.)
   'bytedance/seedance-2.5-flash/text-to-video': flash({ reference_images: list(10), reference_videos: list(5) }),
   'bytedance/seedance-2.5-flash/reference-to-video': flash({ reference_images: list(10), reference_videos: list(5) }),
   'bytedance/seedance-2.5-flash/image-to-video': flash({ image: str, last_image: str }),
   'bytedance/seedance-2.5-flash/video-edit': flash({ video: str, reference_images: list(10) }),
+  'bytedance/seedance-2.5-flash/text-to-video-turbo': flashTurbo({ reference_images: list(10), reference_videos: list(5) }),
+  'bytedance/seedance-2.5-flash/reference-to-video-turbo': flashTurbo({ reference_images: list(10), reference_videos: list(5) }),
   'bytedance/seedance-2.5/text-to-video': video({ reference_images: list(30), reference_videos: list(10) }),
   // The fixture's Seedance takes no audio references, so audio still moves to another model.
   'bytedance/seedance-2.5/reference-to-video': video({ reference_images: list(30), reference_videos: list(10) }),
@@ -223,13 +226,13 @@ describe('planVideo', () => {
     expect(plan.notes).toEqual([]);
   });
 
-  it('fits resolution, ratio and duration to the model and adds each change to the notes (4k is beyond Flash, so Seedance 2.5 takes it)', async () => {
+  it('fits ratio and duration to the model and adds each change to the notes (Flash offers 4k itself)', async () => {
     const plan = await planVideo({ prompt: 'p', resolution: '4k', aspect_ratio: '9:21', duration: 40 }, 'generate', VIDEO_CATALOG);
-    expect(plan.input).toMatchObject({ resolution: '1080p', aspect_ratio: '9:16', duration: 15 });
+    expect(plan.modelId).toBe('bytedance/seedance-2.5-flash/text-to-video');
+    expect(plan.input).toMatchObject({ resolution: '4k', aspect_ratio: '9:16', duration: 30 });
     expect(plan.notes).toEqual([
-      'resolution 4k is not offered by bytedance/seedance-2.5/text-to-video; used 1080p.',
-      'duration 40 is not offered by bytedance/seedance-2.5/text-to-video; used 15.',
-      'aspect_ratio 9:21 is not offered by bytedance/seedance-2.5/text-to-video; used 9:16.',
+      'duration 40 is not offered by bytedance/seedance-2.5-flash/text-to-video; used 30.',
+      'aspect_ratio 9:21 is not offered by bytedance/seedance-2.5-flash/text-to-video; used 9:16.',
     ]);
   });
 
@@ -258,21 +261,30 @@ describe('planVideo', () => {
   });
 
   it('keeps a request Flash cannot honour on Seedance 2.5 instead of trimming it', async () => {
-    // 11 images, 1080p and 4k are all beyond Flash (10 images, 480p / 720p).
+    // 11 images are beyond Flash (10 images, 5 videos, 5 audios); so are they beyond its turbo tier, which is skipped with it.
     const many = Array.from({ length: 11 }, (_, i) => `https://x/${i}.png`);
     const refs = await planVideo({ prompt: 'p', reference_images: many }, 'generate', VIDEO_CATALOG);
     expect(refs.modelId).toBe('bytedance/seedance-2.5/reference-to-video');
     expect(refs.input.reference_images).toHaveLength(11);
     expect(refs.notes).toEqual([]);
-    const hd = await planVideo({ prompt: 'p', resolution: '1080p' }, 'generate', VIDEO_CATALOG);
-    expect(hd.modelId).toBe('bytedance/seedance-2.5/text-to-video');
-    expect(hd.input.resolution).toBe('1080p');
-    // 720p and a draft 480p stay on Flash.
-    expect((await planVideo({ prompt: 'p', resolution: '480p' }, 'generate', VIDEO_CATALOG)).modelId).toBe('bytedance/seedance-2.5-flash/text-to-video');
+    // 1080p, 4k, 720p and a draft 480p all stay on Flash, never on its turbo tier.
+    for (const resolution of ['480p', '720p', '1080p', '4k']) {
+      const plan = await planVideo({ prompt: 'p', resolution }, 'generate', VIDEO_CATALOG);
+      expect(plan.modelId).toBe('bytedance/seedance-2.5-flash/text-to-video');
+      expect(plan.input.resolution).toBe(resolution);
+      expect(plan.notes).toEqual([]);
+    }
     // A named Flash is not switched: the request is trimmed to its limits, as for any named model.
     const named = await planVideo({ prompt: 'p', model: 'seedance-2.5-flash', reference_images: many }, 'generate', VIDEO_CATALOG);
     expect(named.modelId).toBe('bytedance/seedance-2.5-flash/reference-to-video');
     expect(named.input.reference_images).toHaveLength(10);
+  });
+
+  it('uses the turbo tier only when it is named, at its own resolutions', async () => {
+    const turbo = await planVideo({ prompt: 'p', model: 'seedance-2.5-flash-turbo', resolution: '4k' }, 'generate', VIDEO_CATALOG);
+    expect(turbo.modelId).toBe('bytedance/seedance-2.5-flash/text-to-video-turbo');
+    expect(turbo.input.resolution).toBe('1080p');
+    expect(turbo.notes[0]).toContain('used 1080p');
   });
 
   it('moves to another model when the default cannot take the inputs, and says so', async () => {

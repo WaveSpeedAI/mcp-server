@@ -272,7 +272,8 @@ export async function planVideo(args: VideoArgs, action: VideoAction, propsOf: P
     (args.reference_videos?.length ?? 0) > limits.maxRefs.videos ||
     (args.reference_audios?.length ?? 0) > limits.maxRefs.audios;
   const ordered = pinned ? [first] : [first, ...VIDEO_MODEL_KEYS.filter((k) => k !== first)];
-  const keys = !pinned && first === DEFAULT_VIDEO_MODEL && exceeds ? ordered.slice(1) : ordered;
+  // Skipping the default skips its turbo sibling too: it takes the same inputs and offers less.
+  const keys = !pinned && first === DEFAULT_VIDEO_MODEL && exceeds ? ordered.filter((k) => VIDEO_MODELS[k].base !== limits.base) : ordered;
 
   interface Candidate { key: VideoModelKey; mode: Mode; wanted: Record<string, unknown>; lost: string[] }
   const candidates: Candidate[] = [];
