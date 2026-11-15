@@ -98,9 +98,9 @@ const seedance = (id: VideoModelKey, label: string, base: string, turbo: boolean
   maxRefs: v25 ? { images: 30, videos: 10, audios: 10 } : { images: 9, videos: 3, audios: 3 },
 })
 // Flash: generated natively at 480p / 720p; 1080p and 4k are upscaled from 720p (mov stops at 720p). The turbo tier takes
-// 720p / 1080p only. At most 10 images, 5 videos and 5 audios, and no extend endpoint.
+// 720p / 1080p only. At most 10 images, 5 videos and 5 audios. The standard tier extends; its turbo tier has no extend endpoint.
 const seedanceFlash = (id: VideoModelKey, label: string, turbo: boolean): VideoModel => ({
-  id, label, family: 'seedance-2.5', base: 'bytedance/seedance-2.5-flash', turbo, modes: ['generate', 'edit'],
+  id, label, family: 'seedance-2.5', base: 'bytedance/seedance-2.5-flash', turbo, modes: turbo ? ['generate', 'edit'] : ['generate', 'edit', 'extend'],
   resolutions: turbo ? TURBO_RES : ALL_RES, defaultResolution: '720p',
   durations: [4, 30], aspectRatios: SEEDANCE_ASPECTS, audio: true,
   maxRefs: { images: 10, videos: 5, audios: 5 },

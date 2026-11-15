@@ -565,7 +565,7 @@ export function createServer(): McpServer {
 
   server.tool(
     'extend_video',
-    `Continue an existing video with new footage after its end, with the same models as the WaveSpeed /chat page. Turbo models cannot extend. ${REFS}`,
+    `Continue an existing video with new footage after its end, with the same models as the WaveSpeed /chat page (Seedance 2.5 Flash included). Turbo models, Flash Turbo too, cannot extend. ${REFS}`,
     {
       prompt: z.string().min(1).describe('What happens next.'),
       video: z.string().describe('The video to continue (URL or "@./path").'),

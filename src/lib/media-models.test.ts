@@ -33,7 +33,7 @@ describe('media models', () => {
       reference: 'bytedance/seedance-2.5/reference-to-video-turbo',
       edit: 'bytedance/seedance-2.5/video-edit-turbo',
     });
-    // Flash has its own endpoint prefix and no extend endpoint; its turbo tier uses the -turbo suffix on that prefix.
+    // Flash has its own endpoint prefix and extends; its turbo tier uses the -turbo suffix on that prefix and has no extend endpoint.
     expect(videoEndpoints(VIDEO_MODELS['seedance-2.5-flash-turbo'])).toEqual({
       text: 'bytedance/seedance-2.5-flash/text-to-video-turbo',
       image: 'bytedance/seedance-2.5-flash/image-to-video-turbo',
@@ -47,6 +47,7 @@ describe('media models', () => {
       image: 'bytedance/seedance-2.5-flash/image-to-video',
       reference: 'bytedance/seedance-2.5-flash/reference-to-video',
       edit: 'bytedance/seedance-2.5-flash/video-edit',
+      extend: 'bytedance/seedance-2.5-flash/video-extend',
     });
     expect(videoEndpoints(VIDEO_MODELS['minimax-h3']).reference).toBe('wavespeed-ai/minimax-h3/reference-to-video');
     expect(videoEndpoints(VIDEO_MODELS['seedance-2.0']).reference).toBe('bytedance/seedance-2.0/reference-to-video');

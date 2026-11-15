@@ -194,12 +194,13 @@ const flash = (extra: Record<string, Prop> = {}, resolutions = ['480p', '720p', 
 const flashTurbo = (extra: Record<string, Prop> = {}) => flash(extra, ['720p', '1080p']);
 
 const VIDEO_CATALOG = catalog({
-  // Seedance 2.5 Flash: 480p to 4k (1080p / 4k upscaled), 10 images, 5 videos; no extend endpoint; a turbo tier at 720p / 1080p. (Like the fixture's Seedance it takes no audio
+  // Seedance 2.5 Flash: 480p to 4k (1080p / 4k upscaled), 10 images, 5 videos; the standard tier extends (no end image), a turbo tier at 720p / 1080p does not. (Like the fixture's Seedance it takes no audio
   // references here, so audio still moves to another model; the live schema does take them.)
   'bytedance/seedance-2.5-flash/text-to-video': flash({ reference_images: list(10), reference_videos: list(5) }),
   'bytedance/seedance-2.5-flash/reference-to-video': flash({ reference_images: list(10), reference_videos: list(5) }),
   'bytedance/seedance-2.5-flash/image-to-video': flash({ image: str, last_image: str }),
   'bytedance/seedance-2.5-flash/video-edit': flash({ video: str, reference_images: list(10) }),
+  'bytedance/seedance-2.5-flash/video-extend': flash({ video: str }),
   'bytedance/seedance-2.5-flash/text-to-video-turbo': flashTurbo({ reference_images: list(10), reference_videos: list(5) }),
   'bytedance/seedance-2.5-flash/reference-to-video-turbo': flashTurbo({ reference_images: list(10), reference_videos: list(5) }),
   'bytedance/seedance-2.5/text-to-video': video({ reference_images: list(30), reference_videos: list(10) }),
@@ -306,14 +307,26 @@ describe('planVideo', () => {
     const edit = await planVideo({ prompt: 'p', video: 'https://x/v.mp4', reference_images: ['https://x/a.png'] }, 'edit', VIDEO_CATALOG);
     expect(edit.modelId).toBe('bytedance/seedance-2.5-flash/video-edit');
     expect(edit.input.video).toBe('https://x/v.mp4');
-    const extend = await planVideo({ prompt: 'p', video: 'https://x/v.mp4', last_frame: 'https://x/e.png', duration: 6 }, 'extend', VIDEO_CATALOG);
-    // Flash has no extend endpoint, so the next model does.
-    expect(extend.modelId).toBe('bytedance/seedance-2.5/video-extend');
-    expect(extend.input).toMatchObject({ video: 'https://x/v.mp4', last_image: 'https://x/e.png', duration: 6 });
+    // Flash extends: an unnamed extend stays on the default model.
+    const extend = await planVideo({ prompt: 'p', video: 'https://x/v.mp4', duration: 6 }, 'extend', VIDEO_CATALOG);
+    expect(extend.modelId).toBe('bytedance/seedance-2.5-flash/video-extend');
+    expect(extend.input).toMatchObject({ video: 'https://x/v.mp4', duration: 6 });
+    // Its extend takes no end image, so a request with one moves to the next model whose extend does.
+    const withEnd = await planVideo({ prompt: 'p', video: 'https://x/v.mp4', last_frame: 'https://x/e.png', duration: 6 }, 'extend', VIDEO_CATALOG);
+    expect(withEnd.modelId).toBe('bytedance/seedance-2.5/video-extend');
+    expect(withEnd.input).toMatchObject({ video: 'https://x/v.mp4', last_image: 'https://x/e.png', duration: 6 });
   });
 
   it('cannot extend on a turbo model', async () => {
     await expect(planVideo({ prompt: 'p', model: 'seedance-2.5-turbo', video: 'https://x/v.mp4' }, 'extend', VIDEO_CATALOG)).rejects.toThrow('cannot extend');
+    // Flash Turbo has no extend endpoint either; the error names the default model, which can.
+    await expect(planVideo({ prompt: 'p', model: 'seedance-2.5-flash-turbo', video: 'https://x/v.mp4' }, 'extend', VIDEO_CATALOG)).rejects.toThrow(/cannot extend.*seedance-2.5-flash/);
+  });
+
+  it('extends on a named Flash at 4k', async () => {
+    const plan = await planVideo({ prompt: 'p', model: 'seedance-2.5-flash', video: 'https://x/v.mp4', resolution: '4k' }, 'extend', VIDEO_CATALOG);
+    expect(plan.modelId).toBe('bytedance/seedance-2.5-flash/video-extend');
+    expect(plan.input).toMatchObject({ resolution: '4k' });
   });
 
   it('rejects a model that is not on the /chat list', async () => {
