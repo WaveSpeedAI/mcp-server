@@ -23,12 +23,12 @@
     "url": "https://github.com/WaveSpeedAI/mcp-server",
     "source": "github"
   },
-  "version": "1.2.14",
+  "version": "1.2.15",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@wavespeed/mcp",
-      "version": "1.2.14",
+      "version": "1.2.15",
       "transport": {
         "type": "stdio"
       },
