@@ -113,10 +113,10 @@ const wan = (id: VideoModelKey, label: string, base: string): VideoModel => ({
 
 /** In menu order; the first is the default. */
 export const VIDEO_MODELS: Record<VideoModelKey, VideoModel> = {
-  'seedance-2.5-flash': seedanceFlash('seedance-2.5-flash', 'Seedance 2.5 Flash', false),
-  'seedance-2.5-flash-turbo': seedanceFlash('seedance-2.5-flash-turbo', 'Seedance 2.5 Flash Turbo', true),
   'seedance-2.5': seedance('seedance-2.5', 'Seedance 2.5', 'bytedance/seedance-2.5', false, true),
   'seedance-2.5-turbo': seedance('seedance-2.5-turbo', 'Seedance 2.5 Turbo', 'bytedance/seedance-2.5', true, true),
+  'seedance-2.5-flash': seedanceFlash('seedance-2.5-flash', 'Seedance 2.5 Flash', false),
+  'seedance-2.5-flash-turbo': seedanceFlash('seedance-2.5-flash-turbo', 'Seedance 2.5 Flash Turbo', true),
   'seedance-2.0': seedance('seedance-2.0', 'Seedance 2.0', 'bytedance/seedance-2.0', false, false),
   'seedance-2.0-turbo': seedance('seedance-2.0-turbo', 'Seedance 2.0 Turbo', 'bytedance/seedance-2.0', true, false),
   'seedance-2.0-fast': seedance('seedance-2.0-fast', 'Seedance 2.0 Fast', 'bytedance/seedance-2.0-fast', false, false),

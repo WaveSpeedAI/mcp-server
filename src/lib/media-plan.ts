@@ -263,17 +263,9 @@ export async function planVideo(args: VideoArgs, action: VideoAction, propsOf: P
 
   const pinned = args.model !== undefined && args.model !== '';
   const first = videoModelKey(args.model);
-  // The default is the cheapest tier and takes the fewest inputs (Seedance 2.5 Flash: 480p / 720p, 10 images). When the
-  // caller asked for more than it offers, move on to the next model instead of trimming the request to fit.
-  const limits = VIDEO_MODELS[first];
-  const exceeds =
-    (args.resolution != null && args.resolution !== '' && !limits.resolutions.includes(args.resolution)) ||
-    (args.reference_images?.length ?? 0) > limits.maxRefs.images ||
-    (args.reference_videos?.length ?? 0) > limits.maxRefs.videos ||
-    (args.reference_audios?.length ?? 0) > limits.maxRefs.audios;
-  const ordered = pinned ? [first] : [first, ...VIDEO_MODEL_KEYS.filter((k) => k !== first)];
-  // Skipping the default skips its turbo sibling too: it takes the same inputs and offers less.
-  const keys = !pinned && first === DEFAULT_VIDEO_MODEL && exceeds ? ordered.filter((k) => VIDEO_MODELS[k].base !== limits.base) : ordered;
+  // The default is Seedance 2.5. An unnamed request is never moved to another model because it asks for more than the default
+  // offers (a reference count or a resolution tier): it is fitted to the model it started on, as a named model's is.
+  const keys = pinned ? [first] : [first, ...VIDEO_MODEL_KEYS.filter((k) => k !== first)];
 
   interface Candidate { key: VideoModelKey; mode: Mode; wanted: Record<string, unknown>; lost: string[] }
   const candidates: Candidate[] = [];
