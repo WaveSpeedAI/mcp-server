@@ -18,7 +18,7 @@
 
 <!-- mcp-name: ai.wavespeed/mcp -->
 
-An MCP server for the [WaveSpeed](https://wavespeed.ai) platform: run any model on the **live catalog** — image, video, audio, 3D — from Claude Code, Claude Desktop, Cursor, Cline, or any MCP client.
+An MCP server for the [WaveSpeed](https://wavespeed.ai) platform: run any model on the **live catalog** — image, video, audio, 3D — from ChatGPT, Claude, Claude Code, Codex, Cursor, Cline, or any MCP client.
 
 Built on the same design as the open-source [`@wavespeed/cli`](https://github.com/WaveSpeedAI/wavespeed-cli):
 
@@ -64,8 +64,10 @@ The same server is hosted at:
 https://api.wavespeed.ai/mcp
 ```
 
-- **Claude on the web / ChatGPT:** add a custom connector with that address and approve the connection on the WaveSpeed page that opens. Approving creates a dedicated API key (named `MCP · <app>`) that you can delete on the [API Keys](https://wavespeed.ai/accesskey) page to disconnect.
+- **Claude (web / Desktop):** add a custom connector with that address and approve the connection on the WaveSpeed page that opens. Approving creates a dedicated API key (named `MCP · <app>`) that you can delete on the [API Keys](https://wavespeed.ai/accesskey) page to disconnect.
+- **ChatGPT:** open **Plugins**, select the plus button and choose **Add custom MCP server**. Set the server URL to that address (keep the `/mcp`), choose **OAuth**, approve the connection on the WaveSpeed page that opens, then install it before starting a chat. Custom MCP servers are available on selected ChatGPT plans; see OpenAI's [help article](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
 - **Claude Code:** `claude mcp add --transport http wavespeed https://api.wavespeed.ai/mcp`
+- **Codex:** `codex mcp add wavespeed --url https://api.wavespeed.ai/mcp`, then `codex mcp login wavespeed` to approve in your browser. To use an API key instead, add `--bearer-token-env-var WAVESPEED_API_KEY` to the `add` command.
 - **Cursor:**
   <a href="https://cursor.com/install-mcp?name=wavespeed&config=eyJ1cmwiOiJodHRwczovL2FwaS53YXZlc3BlZWQuYWkvbWNwIn0%3D">
     <picture>
@@ -101,6 +103,12 @@ Auth resolves from `WAVESPEED_API_KEY`, or from the CLI's stored login (`wavespe
 
 ```bash
 claude mcp add wavespeed -- npx -y @wavespeed/mcp@latest
+```
+
+**Codex**
+
+```bash
+codex mcp add wavespeed --env WAVESPEED_API_KEY=wsk_... -- npx -y @wavespeed/mcp@latest
 ```
 
 **Claude Desktop / other clients** (`mcpServers` config):
