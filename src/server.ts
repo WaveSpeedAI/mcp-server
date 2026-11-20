@@ -16,7 +16,8 @@
 //   page is linked next to them for what each input means.
 
 import { createRequire } from 'node:module';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolAnnotations } from '@modelcontextprotocol/server';
+import { McpServer, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { Client } from 'wavespeed';
 import {
@@ -34,6 +35,7 @@ import {
   waitForPrediction,
   MCP_CLIENT_NAME,
   TERMINAL_FAILURES,
+  isPending,
   type LiveModel,
   type Prediction,
 } from './lib/api.js';
@@ -57,6 +59,7 @@ import { findUnknownInputs } from './lib/validate-inputs.js';
 import { checkModelId, checkPredictionId } from './lib/ids.js';
 import { IMAGE_MODEL_KEYS, VIDEO_MODEL_KEYS } from './lib/media-models.js';
 import { planImage, planVideo, type MediaPlan, type Prop } from './lib/media-plan.js';
+import { decodeTaskId, TASKS_EXTENSION, taskCreated, taskState, type TaskRef } from './lib/tasks.js';
 
 const require = createRequire(import.meta.url);
 const { version: PKG_VERSION } = require('../package.json') as { version: string };
@@ -104,26 +107,38 @@ const STILL_RUNNING_HINT =
   'The run was submitted and is processing on the server. Call get_prediction with this id and wait_seconds ' +
   'until done=true; it returns the output URLs. Do not submit the same run again: a new run is billed again.';
 
+// The handler context the SDK passes to every tool: progress, cancellation and,
+// on a 2026-07-28 request, the client capabilities it declared.
 type ToolExtra = {
-  signal: AbortSignal;
-  _meta?: { progressToken?: string | number };
-  sendNotification: (n: {
-    method: 'notifications/progress';
-    params: { progressToken: string | number; progress: number; message?: string };
-  }) => Promise<void>;
+  mcpReq: {
+    signal: AbortSignal;
+    _meta?: { progressToken?: string | number };
+    // Keyed by the reserved _meta names, e.g. io.modelcontextprotocol/clientCapabilities.
+    envelope?: Record<string, any>;
+    notify: (n: {
+      method: 'notifications/progress';
+      params: { progressToken: string | number; progress: number; message?: string };
+    }) => Promise<void>;
+  };
 };
+
+// A client that declared the tasks extension gets a run that is still going
+// back as a task: it polls tasks/get itself and is told when the run ends.
+function takesTasks(extra: ToolExtra): boolean {
+  return extra.mcpReq.envelope?.['io.modelcontextprotocol/clientCapabilities']?.extensions?.[TASKS_EXTENSION] !== undefined;
+}
 
 // Emits notifications/progress while polling when the client asked for it.
 // Each one carries the prediction id, and clients that reset their timeout
 // on progress keep a long wait alive.
 function progressTicker(extra: ToolExtra, id: string, startedAt: number) {
-  const token = extra._meta?.progressToken;
+  const token = extra.mcpReq._meta?.progressToken;
   if (token === undefined) return undefined;
   let n = 0;
   return async (item: Prediction) => {
     const secs = Math.floor((Date.now() - startedAt) / 1000);
-    await extra
-      .sendNotification({
+    await extra.mcpReq
+      .notify({
         method: 'notifications/progress',
         params: { progressToken: token, progress: ++n, message: `prediction ${id}: ${item.status} (${secs}s)` },
       })
@@ -184,15 +199,28 @@ async function reportPrediction(
   // always: in every reply; waited: only when the call waited for the result.
   more: { always?: Record<string, unknown>; waited?: Record<string, unknown> } = {},
 ) {
+  const ref: TaskRef = { p: submitted.id, m: model, a: more.always, r: true };
   if (waitSeconds === 0) {
+    if (takesTasks(extra)) return taskCreated(ref, submitted.status);
     return ok({ id: submitted.id, status: submitted.status, model, done: false, ...more.always, next: STILL_RUNNING_HINT });
   }
   const { item, done } = await waitForPrediction(submitted.id, {
     intervalMs: POLL_INTERVAL_MS,
     timeoutMs: waitSeconds * 1000,
     onTick: progressTicker(extra, submitted.id, started),
-    signal: extra.signal,
+    signal: extra.mcpReq.signal,
   });
+  if (!done && takesTasks(extra)) return taskCreated(ref, item.status, item.created_at);
+  return runOutcome(item, done, ref, Date.now() - started, more.waited);
+}
+
+// A run tool's reply once it has waited: the result, or an error naming the
+// task when the run ended without success. tasks/get completes a task with it.
+export function runOutcome(item: Prediction, done: boolean, ref: TaskRef, elapsedMs: number, waited?: Record<string, unknown>) {
+  const submitted = { id: ref.p };
+  const model = ref.m;
+  const more = { always: ref.a, waited };
+  const started = Date.now() - elapsedMs;
   if (TERMINAL_FAILURES.includes(item.status)) {
     throw new Error(`Prediction ${item.status}${item.error ? `: ${item.error}` : ''} (task_id: ${submitted.id})`);
   }
@@ -210,7 +238,7 @@ async function reportPrediction(
   });
 }
 
-function ok(payload: unknown) {
+export function ok(payload: unknown) {
   const res: { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown> } = {
     content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
   };
@@ -218,6 +246,19 @@ function ok(payload: unknown) {
     res.structuredContent = payload as Record<string, unknown>;
   }
   return res;
+}
+
+function predictionReport(item: Prediction, id: string, done: boolean) {
+  return {
+    id: item.id || id,
+    model: item.model,
+    status: item.status,
+    done,
+    outputs: item.outputs ?? [],
+    error: item.error,
+    created_at: item.created_at,
+    ...(done ? {} : { next: STILL_RUNNING_HINT }),
+  };
 }
 
 export function createServer(): McpServer {
@@ -233,6 +274,7 @@ export function createServer(): McpServer {
       ],
     },
     {
+      capabilities: { extensions: { [TASKS_EXTENSION]: {} } } as any,
       instructions: [
         'WaveSpeed AI media generation (image, video, audio, 3D).',
         'Pattern: list_models to find a model, get_model_schema to see its',
@@ -250,31 +292,35 @@ export function createServer(): McpServer {
     },
   );
 
-  // Every tool gets the same two additions: a balance that is too low comes back with the top-up link, and the
-  // tools that show a result point at the result card.
-  const registerTool = server.tool.bind(server) as (...args: any[]) => any;
-  (server as any).tool = (...args: any[]) => {
-    const name = args[0] as string;
-    const cb = args[args.length - 1] as (...a: any[]) => Promise<unknown>;
-    args[args.length - 1] = async (...a: any[]) => {
-      try {
-        return await cb(...a);
-      } catch (err: any) {
-        const message = String(err?.message ?? err);
-        if (!isInsufficientCredits(message)) throw err;
-        return insufficientCreditsResult(message, a[0]?.model);
-      }
-    };
-    const tool = registerTool(...args);
-    // Refuse an argument the tool does not declare. zod objects strip unknown keys by default, so a misspelt
-    // name ("inputs" for get_price's "input") ran as if left out and quoted the model with no inputs at all.
-    if (typeof tool.inputSchema?.strict === 'function') {
-      const accepted = Object.keys(tool.inputSchema.shape ?? {}).sort().join(', ') || 'none';
-      tool.inputSchema = tool.inputSchema.strict(`Unknown argument for ${name}. It accepts: ${accepted}.`);
-    }
+  // Every tool gets the same three additions: a balance that is too low comes back with the top-up link, the
+  // tools that show a result point at the result card, and an argument the tool does not declare is refused (zod
+  // objects strip unknown keys by default, so a misspelt name, "inputs" for get_price's "input", ran as if left out
+  // and quoted the model with no inputs at all).
+  const tool = (
+    name: string,
+    description: string,
+    shape: z.ZodRawShape,
+    annotations: ToolAnnotations,
+    cb: (args: any, extra: ToolExtra) => Promise<unknown>,
+  ) => {
+    const accepted = Object.keys(shape).sort().join(', ') || 'none';
+    const inputSchema = z.strictObject(shape, {
+      error: (iss) => (iss.code === 'unrecognized_keys' ? `Unknown argument for ${name}. It accepts: ${accepted}.` : undefined),
+    });
     const meta = toolMeta(name);
-    if (meta) tool.update({ _meta: meta });
-    return tool;
+    return server.registerTool(
+      name,
+      { description, inputSchema, annotations, ...(meta ? { _meta: meta } : {}) },
+      (async (args: any, extra: ToolExtra) => {
+        try {
+          return await cb(args, extra);
+        } catch (err: any) {
+          const message = String(err?.message ?? err);
+          if (!isInsufficientCredits(message)) throw err;
+          return insufficientCreditsResult(message, args?.model);
+        }
+      }) as any,
+    );
   };
 
   server.registerResource(
@@ -303,7 +349,7 @@ export function createServer(): McpServer {
     }),
   );
 
-  server.tool(
+  tool(
     'list_models',
     'Search the live WaveSpeed model catalog (image, video, audio, 3D). Returns model IDs usable with run_model. Do not invent model IDs — always pick one returned by this tool.',
     {
@@ -335,7 +381,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'get_model_schema',
     "Get a model's real input schema (required fields, properties, defaults). Call this before run_model so inputs match what the model actually accepts.",
     { model: z.string().describe('Model ID from list_models, e.g. bytedance/seedream-v5.0-pro') },
@@ -359,13 +405,13 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'run_model',
     'Run any WaveSpeed model. input keys come from get_model_schema; unknown keys are rejected before submission. Local files: pass "@./path" in a media field (image, images, video, audio, mask …) — it is uploaded and replaced with hosted URLs (bare paths are NOT uploaded). Returns the prediction id right away (done=false); call get_prediction with that id and wait_seconds until done=true to get the output URLs. The task keeps running on the server. Pass wait_seconds here to wait for a quick model in the same call.',
     {
       model: z.string().describe('Model ID from list_models'),
       input: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .describe('Model inputs per its schema (e.g. {"prompt": "...", "aspect_ratio": "16:9"})'),
       wait_seconds: z
         .number()
@@ -468,7 +514,7 @@ export function createServer(): McpServer {
   };
   const IMAGE_KEYS = ['images', 'reference_images'];
 
-  server.tool(
+  tool(
     'generate_image',
     `Create an image from a text description with the same models as the WaveSpeed /chat page (${IMAGE_MODEL_KEYS.join(', ')}; default ${IMAGE_MODEL_KEYS[0]}). Give reference_images to use existing images as subject, product, face or style (the model's edit endpoint is used). To change existing images use edit_image. ${REFS}`,
     { ...imageShape, reference_images: mediaList('Optional images whose subject, product, face or style the new image should use').optional() },
@@ -480,7 +526,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'edit_image',
     `Change existing images with the same models as the WaveSpeed /chat page: edits, restyles, backgrounds, adding or removing things, combining several images. ${REFS}`,
     { ...imageShape, images: mediaList('The images to edit, in order').min(1) },
@@ -512,7 +558,7 @@ export function createServer(): McpServer {
     .describe("Seconds, only when the user asks for a length; omit to use the model default. A length outside the model's range is moved into it; a note says when.");
   const VIDEO_KEYS = ['first_frame', 'last_frame', 'reference_images', 'reference_videos', 'reference_audios', 'video'];
 
-  server.tool(
+  tool(
     'generate_video',
     `Create a video with the same models as the WaveSpeed /chat page (default ${VIDEO_MODEL_KEYS[0]}). Give first_frame to animate an image; give reference_images / reference_videos / reference_audios to keep characters, products, motion, voice or music. The right mode (text, image or reference to video) is picked from what you give. Videos can cost dollars: use estimate_only first when unsure. ${REFS}`,
     {
@@ -542,7 +588,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'edit_video',
     `Edit an existing video with the same models as the WaveSpeed /chat page. Name the video and any references in the prompt (e.g. "replace the cat in @video 1 with the lion from @image 1"). ${REFS}`,
     {
@@ -563,7 +609,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'extend_video',
     `Continue an existing video with new footage after its end, with the same models as the WaveSpeed /chat page (Seedance 2.5 Flash included). Turbo models, Flash Turbo too, cannot extend. ${REFS}`,
     {
@@ -584,12 +630,12 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'get_price',
     'Estimate the cost of a run before executing it (no charge). Provide the same input you would pass to run_model — pricing often depends on inputs like duration or resolution, and a quote made without them can be lower than the real charge.',
     {
       model: z.string().describe('Model ID from list_models'),
-      input: z.record(z.unknown()).default({}).describe('Inputs the quote should account for'),
+      input: z.record(z.string(), z.unknown()).default({}).describe('Inputs the quote should account for'),
     },
     // Not read-only, unlike the remote server's get_price: here "@./path" inputs upload local files
     // (a write to the account's uploads) before the quote.
@@ -612,11 +658,11 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool('get_balance', 'Show the WaveSpeed account credit balance, with the link to top up.', {}, { readOnlyHint: true, destructiveHint: false, openWorldHint: true }, async () => {
+  tool('get_balance', 'Show the WaveSpeed account credit balance, with the link to top up.', {}, { readOnlyHint: true, destructiveHint: false, openWorldHint: true }, async () => {
     return ok({ ...(await fetchBalance()), top_up_url: TOP_UP_URL });
   });
 
-  server.tool(
+  tool(
     'list_predictions',
     'List past predictions (run history), newest window first. Defaults to the last 24 hours; pass since/until (ISO or YYYY-MM-DD) for other ranges. Use get_prediction with an id for one task in full.',
     {
@@ -642,7 +688,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'list_billings',
     'List itemized charges and refunds (billing records). Requires an API key with Billing access.',
     {
@@ -670,7 +716,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'get_usage',
     'Usage statistics: spend, request counts, daily series and per-model breakdown. Defaults to the last 7 days. Requires an API key with Billing access.',
     {
@@ -686,7 +732,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'delete_predictions',
     `Delete finished predictions from this account's run history, up to ${MAX_DELETE_IDS} at a time. This is a soft delete: each record stays, with status "deleted" and without its outputs, and list_predictions and get_prediction still return it that way; the output links are revoked (best effort). This tool cannot undo it. Runs that are still going are left alone, and only the key's own organization's records are deleted. Ask the user first, and pass confirm: true only after they agreed to delete these ids.`,
     {
@@ -701,7 +747,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'upload_file',
     'Upload a local file to WaveSpeed and get its hosted URL (identical bytes reuse the same upload for 24h). Usually unnecessary — run_model handles "@./path" inputs itself.',
     { path: z.string().describe('Local file path') },
@@ -711,7 +757,7 @@ export function createServer(): McpServer {
     },
   );
 
-  server.tool(
+  tool(
     'get_prediction',
     'Fetch the status and outputs of a past or in-flight prediction by id — use to pick up a run that returned done=false. Pass wait_seconds to keep waiting for it to finish.',
     {
@@ -732,20 +778,48 @@ export function createServer(): McpServer {
         intervalMs: POLL_INTERVAL_MS,
         timeoutMs: wait_seconds * 1000,
         onTick: wait_seconds > 0 ? progressTicker(extra, id, started) : undefined,
-        signal: extra.signal,
+        signal: extra.mcpReq.signal,
       });
-      return ok({
-        id: item.id || id,
-        model: item.model,
-        status: item.status,
-        done,
-        outputs: item.outputs ?? [],
-        error: item.error,
-        created_at: item.created_at,
-        ...(done ? {} : { next: STILL_RUNNING_HINT }),
-      });
+      if (!done && takesTasks(extra)) return taskCreated({ p: id }, item.status, item.created_at);
+      return ok(predictionReport(item, id, done));
     },
   );
+
+  // The tasks extension: a task id names a prediction, so a poll is one read of it.
+  const TaskParams = z.looseObject({ taskId: z.string() });
+  const TaskResult = z.looseObject({});
+  server.server.setRequestHandler('tasks/get', { params: TaskParams, result: TaskResult }, async ({ taskId }) => {
+    const ref = decodeTaskId(taskId);
+    if (!ref) throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Task not found');
+    let item: Prediction;
+    try {
+      item = await fetchPrediction(ref.p);
+    } catch (err: any) {
+      // A status read that fails says nothing about the run: still working.
+      return taskState(ref, 'working', String(err?.message ?? err));
+    }
+    if (isPending(item.status)) return taskState(ref, 'working', undefined, item);
+    let result: Record<string, unknown>;
+    if (ref.r) {
+      const created = Date.parse(item.created_at ?? '');
+      try {
+        result = runOutcome(item, true, ref, Number.isNaN(created) ? 0 : Date.now() - created);
+      } catch (err: any) {
+        const message = String(err?.message ?? err);
+        result = isInsufficientCredits(message)
+          ? (insufficientCreditsResult(message, ref.m) as Record<string, unknown>)
+          : { content: [{ type: 'text', text: message }], isError: true };
+      }
+    } else {
+      result = ok(predictionReport(item, ref.p, true));
+    }
+    return taskState(ref, 'completed', undefined, item, { ...result, resultType: 'complete' });
+  });
+  server.server.setRequestHandler('tasks/cancel', { params: TaskParams, result: TaskResult }, async ({ taskId }) => {
+    // Cancellation is cooperative: a submitted run cannot be stopped.
+    if (!decodeTaskId(taskId)) throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Task not found');
+    return {};
+  });
 
   return server;
 }

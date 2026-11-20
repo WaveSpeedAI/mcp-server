@@ -52,6 +52,8 @@ The five shortcut tools take `wait_seconds` like `run_model`, and `estimate_only
 
 Some generations take minutes to hours. `run_model` submits the run and returns the prediction id right away (`done: false`); the assistant then calls `get_prediction` with that id and `wait_seconds` (max 1800) until `done` is `true`. The task keeps running server-side, so a dropped connection loses nothing. Pass `wait_seconds` to `run_model` to wait for a quick model in the same call. While waiting, both tools send MCP progress notifications that carry the prediction id.
 
+Clients that speak MCP protocol revision 2026-07-28 and declare the tasks extension (for example Claude Code) get a run that is still going back as an MCP task instead: the client follows it on its own and hands the assistant the result when the run ends, so nobody has to keep calling `get_prediction`. Older clients keep the behavior above.
+
 ## Setup
 
 ### Remote (nothing to install)

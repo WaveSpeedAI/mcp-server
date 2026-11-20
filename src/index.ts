@@ -1,18 +1,11 @@
 #!/usr/bin/env node
 // stdio entry point: `wavespeed-mcp` (or `npx -y @wavespeed/mcp@latest`).
+// serveStdio answers both the 2026-07-28 protocol and the initialize-based
+// revisions, chosen by how the client opens the connection.
 
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { createServer } from './server.js';
 
-async function main(): Promise<void> {
-  const server = createServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  // stdout belongs to the MCP protocol; anything human goes to stderr.
-  console.error('wavespeed-mcp: connected (stdio)');
-}
-
-main().catch((err) => {
-  console.error(`wavespeed-mcp: fatal: ${err?.message ?? err}`);
-  process.exit(1);
-});
+serveStdio(() => createServer());
+// stdout belongs to the MCP protocol; anything human goes to stderr.
+console.error('wavespeed-mcp: serving on stdio');
