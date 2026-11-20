@@ -99,6 +99,12 @@ The hosted server has the same tools, with one difference for files: it cannot r
 
 ### Local (npx)
 
+The server is the [`@wavespeed/mcp`](https://www.npmjs.com/package/@wavespeed/mcp) npm package. To run it directly:
+
+```bash
+npx -y @wavespeed/mcp@latest
+```
+
 `@latest` makes npx fetch the newest release on each start; without it, npx runs a globally installed `@wavespeed/mcp` if one exists, however old.
 
 Auth resolves from `WAVESPEED_API_KEY`, or from the CLI's stored login (`wavespeed login`) — one login covers both tools. Keys: [wavespeed.ai/accesskey](https://wavespeed.ai/accesskey).
