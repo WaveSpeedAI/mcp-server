@@ -126,7 +126,7 @@ export const VIDEO_MODELS: Record<VideoModelKey, VideoModel> = {
   'wan-3.0-prime': wan('wan-3.0-prime', 'Wan 3.0 Prime', 'alibaba/wan-3.0-prime'),
   'kling-4.0': {
     id: 'kling-4.0', label: 'Kling 4.0', family: 'kling-4.0', base: 'kwaivgi/kling-v4.0', turbo: false, modes: ['generate', 'edit', 'extend'],
-    resolutions: ['720p', '1080p', '4k'], defaultResolution: '720p', durations: [3, 30],
+    resolutions: ['720p', '1080p'], defaultResolution: '720p', durations: [3, 30],
     // Sound is always generated with the picture; there is no switch.
     aspectRatios: ['16:9', '9:16', '1:1', '21:9'], audio: false, maxRefs: { images: 10, videos: 5, audios: 3 },
   },
