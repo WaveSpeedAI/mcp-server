@@ -129,6 +129,13 @@ describe('fitInput', () => {
       expect(await input('kwaivgi/kling-v4.0/reference-to-video', { aspect_ratio: '4:3' }, ratios)).toEqual({ aspect_ratio: '16:9' });
     });
 
+    it('keeps 4k when the live Kling 4.0 schema offers it, and rounds it down where it does not (edit, extend)', async () => {
+      const res = (values: string[]) =>
+        catalog({ 'kwaivgi/kling-v4.0/text-to-video': { resolution: { type: 'string', enum: values } } });
+      expect(await input('kwaivgi/kling-v4.0/text-to-video', { resolution: '4k' }, res(['720p', '1080p', '4k']))).toEqual({ resolution: '4k' });
+      expect(await input('kwaivgi/kling-v4.0/text-to-video', { resolution: '4k' }, res(['720p', '1080p']))).toEqual({ resolution: '1080p' });
+    });
+
     it('treats 4:3 and 3:4 around 1:1 as a tie, whatever the float error', async () => {
       const both = catalog({ a: { aspect_ratio: { type: 'string', enum: ['4:3', '3:4'] } }, b: { aspect_ratio: { type: 'string', enum: ['3:4', '4:3'] } } });
       expect(await input('a', { aspect_ratio: '1:1' }, both)).toEqual({ aspect_ratio: '4:3' });
