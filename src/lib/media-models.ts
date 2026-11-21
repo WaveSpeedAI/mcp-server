@@ -113,6 +113,8 @@ const wan = (id: VideoModelKey, label: string, base: string): VideoModel => ({
 
 /** In menu order; the first is the default. */
 export const VIDEO_MODELS: Record<VideoModelKey, VideoModel> = {
+  'wan-3.0': wan('wan-3.0', 'Wan 3.0', 'alibaba/wan-3.0'),
+  'wan-3.0-prime': wan('wan-3.0-prime', 'Wan 3.0 Prime', 'alibaba/wan-3.0-prime'),
   'seedance-2.5': seedance('seedance-2.5', 'Seedance 2.5', 'bytedance/seedance-2.5', false, true),
   'seedance-2.5-turbo': seedance('seedance-2.5-turbo', 'Seedance 2.5 Turbo', 'bytedance/seedance-2.5', true, true),
   'seedance-2.5-flash': seedanceFlash('seedance-2.5-flash', 'Seedance 2.5 Flash', false),
@@ -122,8 +124,6 @@ export const VIDEO_MODELS: Record<VideoModelKey, VideoModel> = {
   'seedance-2.0-fast': seedance('seedance-2.0-fast', 'Seedance 2.0 Fast', 'bytedance/seedance-2.0-fast', false, false),
   'seedance-2.0-fast-turbo': seedance('seedance-2.0-fast-turbo', 'Seedance 2.0 Fast Turbo', 'bytedance/seedance-2.0-fast', true, false),
   'seedance-2.0-mini': seedance('seedance-2.0-mini', 'Seedance 2.0 Mini', 'bytedance/seedance-2.0-mini', false, false),
-  'wan-3.0': wan('wan-3.0', 'Wan 3.0', 'alibaba/wan-3.0'),
-  'wan-3.0-prime': wan('wan-3.0-prime', 'Wan 3.0 Prime', 'alibaba/wan-3.0-prime'),
   'kling-4.0': {
     id: 'kling-4.0', label: 'Kling 4.0', family: 'kling-4.0', base: 'kwaivgi/kling-v4.0', turbo: false, modes: ['generate', 'edit', 'extend'],
     resolutions: ['720p', '1080p'], defaultResolution: '720p', durations: [3, 30],

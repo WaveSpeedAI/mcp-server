@@ -13,10 +13,10 @@ import {
 describe('media models', () => {
   it('defaults to the first model of each kind, as /chat does', () => {
     expect(DEFAULT_IMAGE_MODEL).toBe('seedream-5-5');
-    expect(DEFAULT_VIDEO_MODEL).toBe('seedance-2.5');
+    expect(DEFAULT_VIDEO_MODEL).toBe('wan-3.0');
     expect(IMAGE_MODEL_KEYS).toEqual(['seedream-5-5', 'seedream-5-pro', 'nano-banana-2.1', 'nano-banana-2', 'nano-banana-pro', 'gpt-image-2.6', 'gpt-image-2.5', 'gpt-image-2']);
     expect(VIDEO_MODEL_KEYS).toHaveLength(13);
-    expect(VIDEO_MODEL_KEYS.slice(0, 4)).toEqual(['seedance-2.5', 'seedance-2.5-turbo', 'seedance-2.5-flash', 'seedance-2.5-flash-turbo']);
+    expect(VIDEO_MODEL_KEYS.slice(0, 6)).toEqual(['wan-3.0', 'wan-3.0-prime', 'seedance-2.5', 'seedance-2.5-turbo', 'seedance-2.5-flash', 'seedance-2.5-flash-turbo']);
   });
 
   it('names the endpoints each model runs on', () => {

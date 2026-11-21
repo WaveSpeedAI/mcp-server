@@ -263,7 +263,7 @@ export async function planVideo(args: VideoArgs, action: VideoAction, propsOf: P
 
   const pinned = args.model !== undefined && args.model !== '';
   const first = videoModelKey(args.model);
-  // The default is Seedance 2.5. An unnamed request is never moved to another model because it asks for more than the default
+  // The default is Wan 3.0. An unnamed request is never moved to another model because it asks for more than the default
   // offers (a reference count or a resolution tier): it is fitted to the model it started on, as a named model's is.
   const keys = pinned ? [first] : [first, ...VIDEO_MODEL_KEYS.filter((k) => k !== first)];
 
