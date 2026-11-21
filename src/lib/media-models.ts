@@ -78,8 +78,6 @@ export type VideoModel = {
   turbo: boolean
   modes: VideoMode[]
   resolutions: string[]
-  /** Narrower lists for the modes that cannot take every generation resolution (Kling 4.0 edit and extend have no 4k). */
-  modeResolutions?: Partial<Record<VideoMode, string[]>>
   defaultResolution: string
   durations: [number, number]
   aspectRatios: string[]
@@ -128,7 +126,7 @@ export const VIDEO_MODELS: Record<VideoModelKey, VideoModel> = {
   'seedance-2.0-mini': seedance('seedance-2.0-mini', 'Seedance 2.0 Mini', 'bytedance/seedance-2.0-mini', false, false),
   'kling-4.0': {
     id: 'kling-4.0', label: 'Kling 4.0', family: 'kling-4.0', base: 'kwaivgi/kling-v4.0', turbo: false, modes: ['generate', 'edit', 'extend'],
-    resolutions: ['720p', '1080p', '4k'], modeResolutions: { edit: ['720p', '1080p'], extend: ['720p', '1080p'] }, defaultResolution: '720p', durations: [3, 30],
+    resolutions: ['720p', '1080p', '4k'], defaultResolution: '720p', durations: [3, 30],
     // Sound is always generated with the picture; there is no switch.
     aspectRatios: ['16:9', '9:16', '1:1', '21:9'], audio: false, maxRefs: { images: 10, videos: 5, audios: 3 },
   },
@@ -168,11 +166,6 @@ export function videoEndpoints(m: VideoModel): VideoEndpoints {
     edit: `${m.base}/video-edit${suffix}`,
     ...(m.modes.includes('extend') ? { extend: `${m.base}/video-extend` } : {}),
   }
-}
-
-/** The resolutions a model offers in a mode. */
-export function videoResolutions(m: VideoModel, mode: VideoMode): string[] {
-  return m.modeResolutions?.[mode] ?? m.resolutions
 }
 
 /** The input names a model takes its reference media under (Kling 4.0 drops the reference_ prefix). */

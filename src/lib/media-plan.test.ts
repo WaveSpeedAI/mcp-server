@@ -129,7 +129,7 @@ describe('fitInput', () => {
       expect(await input('kwaivgi/kling-v4.0/reference-to-video', { aspect_ratio: '4:3' }, ratios)).toEqual({ aspect_ratio: '16:9' });
     });
 
-    it('keeps 4k when the live Kling 4.0 schema offers it, and rounds it down where it does not (edit, extend)', async () => {
+    it('keeps 4k when the live Kling 4.0 schema offers it, and rounds it down to the nearest tier where it does not', async () => {
       const res = (values: string[]) =>
         catalog({ 'kwaivgi/kling-v4.0/text-to-video': { resolution: { type: 'string', enum: values } } });
       expect(await input('kwaivgi/kling-v4.0/text-to-video', { resolution: '4k' }, res(['720p', '1080p', '4k']))).toEqual({ resolution: '4k' });
