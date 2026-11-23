@@ -51,7 +51,8 @@ MCP client config (Cline / Claude Desktop / any `mcpServers` consumer):
 
 Notes:
 
-- Requires Node.js ≥ 18.
+- Requires Node.js ≥ 20 (the local npm server only; option 1 needs no
+  Node.js unless it goes through `mcp-remote`).
 - `WAVESPEED_API_KEY` is the only configuration. If the user has the
   `@wavespeed/cli` installed and ran `wavespeed login`, the env var can be
   omitted — the server reuses the CLI's stored login.
