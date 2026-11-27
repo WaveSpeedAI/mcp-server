@@ -438,7 +438,7 @@ export function createServer(): McpServer {
   );
 
   // ---- Shortcut verbs: the models the /chat page offers, endpoint and input
-  // chosen and fitted for the caller (see lib/media-plan.ts). They submit and
+  // chosen and checked for the caller (see lib/media-plan.ts). They submit and
   // wait exactly like run_model, and estimate_only quotes without running.
   const waitSchema = z
     .number()
@@ -499,16 +499,16 @@ export function createServer(): McpServer {
     return { args: { ...args, ...resolved.input }, uploaded: resolved.uploaded };
   }
 
-  // Every size any /chat image model offers; each request is fitted to its model's own list.
+  // Every size any /chat image model offers; a size the chosen model does not offer is an error naming the ones it does.
   const IMAGE_RESOLUTIONS = ['0.5k', '1k', '1.5k', '2k', '3k', '4k'] as const;
   const imageShape = {
     prompt: z.string().min(1).describe('Complete visual prompt: subject, composition, style, lighting, mood.'),
     model: z.enum(IMAGE_MODEL_KEYS as [string, ...string[]]).optional().describe('Only when the user names a model; default is the first (Seedream 5.5).'),
-    aspect_ratio: z.string().optional().describe('e.g. 1:1, 16:9, 9:16, 4:3, 3:4, 21:9, 9:21. The closest ratio the model supports is used; a note says when. If omitted: text-to-image is 1:1; with input images it is determined automatically from the input image.'),
+    aspect_ratio: z.string().optional().describe('e.g. 1:1, 16:9, 9:16, 4:3, 3:4, 21:9, 9:21. A ratio the model does not offer is an error that lists the ones it does. If omitted: text-to-image is 1:1; with input images it is determined automatically from the input image.'),
     resolution: z
       .enum(IMAGE_RESOLUTIONS)
       .optional()
-      .describe('Only when the user asks for a size. The closest size the model supports is used (a tie goes to the smaller one); a note says when.'),
+      .describe('Only when the user asks for a size. A size the model does not offer is an error that lists the ones it does and the models that offer it.'),
     wait_seconds: waitSchema,
     estimate_only: estimateSchema,
   };
@@ -541,21 +541,21 @@ export function createServer(): McpServer {
   const videoModelSchema = z
     .enum(VIDEO_MODEL_KEYS as [string, ...string[]])
     .optional()
-    .describe(`Only when the user names a model (${VIDEO_MODEL_KEYS.join(', ')}). Without it the default (${VIDEO_MODEL_KEYS[0]}) is used, and another model only when it cannot take the inputs.`);
+    .describe(`Only when the user names a model (${VIDEO_MODEL_KEYS.join(', ')}). Without it the default (${VIDEO_MODEL_KEYS[0]}) is used; inputs it cannot take are an error naming the models that can (no automatic switch).`);
   // The union of the resolution enums of every /chat video endpoint (live catalog, 2026-11-03);
-  // each request is fitted to its endpoint's own list.
+  // a resolution the chosen endpoint does not offer is an error.
   const VIDEO_RESOLUTIONS = ['480p', '540p', '720p', '768p', '1080p', '4k'] as const;
   const resolutionSchema = z
     .enum(VIDEO_RESOLUTIONS)
     .optional()
     .describe(
-      'Only when the user asks for a resolution, or 480p for a cheaper draft; otherwise omit. The closest resolution the model supports is used (a tie goes to the lower one); a note says when. MiniMax H3 defaults to 768p (its equivalent of 720p).',
+      'Only when the user asks for a resolution, or 480p for a cheaper draft; otherwise omit. A resolution the model does not offer is an error that lists the ones it does and the models that offer it. MiniMax H3 defaults to 768p (its equivalent of 720p).',
     );
   const durationSchema = z
     .number()
     .int()
     .optional()
-    .describe("Seconds, only when the user asks for a length; omit to use the model default. A length outside the model's range is moved into it; a note says when.");
+    .describe("Seconds, only when the user asks for a length; omit to use the model default. A length outside the model's range is an error that states the range.");
   const VIDEO_KEYS = ['first_frame', 'last_frame', 'reference_images', 'reference_videos', 'reference_audios', 'video'];
 
   tool(
@@ -575,7 +575,7 @@ export function createServer(): McpServer {
         .string()
         .optional()
         .describe(
-          "e.g. 16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 9:21. The closest ratio the model supports is used; a note says when. If omitted, the model's default ratio is used; with first_frame the video follows that image's shape and this is ignored.",
+          "e.g. 16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 9:21. A ratio the model does not offer is an error that lists the ones it does. If omitted, the model's default ratio is used; with first_frame the video follows that image's shape and this is ignored.",
         ),
       wait_seconds: waitSchema,
       estimate_only: estimateSchema,
@@ -616,7 +616,7 @@ export function createServer(): McpServer {
       prompt: z.string().min(1).describe('What happens next.'),
       video: z.string().describe('The video to continue (URL or "@./path").'),
       last_frame: z.string().optional().describe('Optional image the continuation should end on.'),
-      duration: durationSchema.describe("Seconds of new footage; omit to use the model default. A length outside the model's range is moved into it; a note says when."),
+      duration: durationSchema.describe("Seconds of new footage; omit to use the model default. A length outside the model's range is an error that states the range."),
       model: videoModelSchema,
       resolution: resolutionSchema,
       wait_seconds: waitSchema,

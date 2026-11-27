@@ -1,5 +1,5 @@
 // Turn a generate/edit request into the endpoint and input to submit: the
-// model choice, the endpoint for the inputs given, and the input fitted to
+// model choice, the endpoint for the inputs given, and the input checked against
 // that endpoint's live schema. A port of /chat's runImage and proposeVideo
 // (api-dashboard lib/chat/server.ts) without the chat session around them, so
 // the same words give the same model, endpoint and input on both.
@@ -38,67 +38,57 @@ export interface MediaPlan {
   label: string;
   mode: string;
   input: Record<string, unknown>;
-  /** What was changed to fit the request; the caller should tell the user. */
+  /** Kept for the callers' shape; nothing is changed to fit a request any more, so it is empty. */
   notes: string[];
 }
 
 export interface FittedInput {
   input: Record<string, unknown>;
-  /** One line per value that was not sent as requested; the caller should tell the user. */
+  /** Kept for the callers' shape; fitting no longer changes a value, so it is empty. */
   notes: string[];
 }
 
-// Size tiers: 480p, 720p, 1080p (rank = N) and 0.5k, 1k, 2k, 4k (rank = X*1000),
-// so 480p < 720p < 768p < 1080p < 2k < 4k on one scale.
-function tierRank(v: unknown): number | undefined {
-  if (typeof v !== 'string') return undefined;
-  const m = /^(\d+(?:\.\d+)?)([pk])$/i.exec(v.trim());
-  if (!m) return undefined;
-  const n = Number(m[1]);
-  return m[2].toLowerCase() === 'k' ? n * 1000 : n;
-}
-
-// ln(W/H) of a W:H ratio, so 2:1 and 1:2 are equally far from 1:1.
-function ratioLog(v: unknown): number | undefined {
-  if (typeof v !== 'string') return undefined;
-  const m = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(v.trim());
-  if (!m) return undefined;
-  const w = Number(m[1]);
-  const h = Number(m[2]);
-  return w > 0 && h > 0 ? Math.log(w / h) : undefined;
-}
-
-// Distances within this count as a tie (4:3 and 3:4 around 1:1 differ only in the last bit).
-const TIE_EPSILON = 1e-9;
-
-/** The member whose score is closest to target; on a tie, the one `better` prefers (default: the first). */
-function closestMember(
-  members: unknown[],
-  score: (v: unknown) => number | undefined,
-  target: number,
-  better: (a: { v: unknown; s: number }, b: { v: unknown; s: number }) => boolean = () => false,
-): unknown {
-  let best: { v: unknown; s: number; d: number } | undefined;
-  for (const v of members) {
-    const s = score(v);
-    if (s === undefined) continue;
-    const d = Math.abs(s - target);
-    if (!best || d < best.d - TIE_EPSILON || (Math.abs(d - best.d) <= TIE_EPSILON && better({ v, s }, best))) best = { v, s, d };
+/** Why `value` cannot be sent as `key` to `modelId`, or undefined when the schema takes it as it is. */
+export function rejection(modelId: string, key: string, prop: Prop | undefined, value: unknown): string | undefined {
+  if (!prop) return `${modelId} does not take ${key}.`;
+  if (Array.isArray(value)) {
+    return prop.maxItems && value.length > prop.maxItems
+      ? `${modelId} takes at most ${prop.maxItems} ${key}; ${value.length} were given.`
+      : undefined;
   }
-  return best?.v;
+  if (prop.enum?.length) {
+    return prop.enum.includes(value)
+      ? undefined
+      : `${key} ${String(value)} is not offered by ${modelId}; it takes ${prop.enum.map(String).join(', ')}.`;
+  }
+  if (typeof value === 'number' && (prop.type === 'integer' || prop.type === 'number')) {
+    if (prop.type === 'integer' && !Number.isInteger(value)) return `${key} must be a whole number for ${modelId}; ${value} was given.`;
+    const low = typeof prop.minimum === 'number' && value < prop.minimum;
+    const high = typeof prop.maximum === 'number' && value > prop.maximum;
+    if (low || high) return `${key} ${value} is outside what ${modelId} takes (${prop.minimum ?? '-'} to ${prop.maximum ?? '-'}).`;
+  }
+  return undefined;
 }
+
+/** A value the model does not take: the request is refused, naming what it takes (and, from the planners, who does). */
+export class InputRejected extends Error {
+  constructor(
+    message: string,
+    readonly key: string,
+    readonly value: unknown,
+  ) {
+    super(message);
+    this.name = 'InputRejected';
+  }
+}
+
+const isEmpty = (v: unknown) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 
 /**
- * Keep only fields the model accepts and fit each value to its schema. The
- * rule is shared with the remote MCP (api-server) and the dashboard /chat:
- * - a size tier (resolution, or an enum of Np / Nk values) the model does not
- *   offer becomes the closest tier it does; a tie goes to the lower one;
- * - a W:H aspect ratio becomes the closest ratio (in ln(W/H)) among the
- *   members that are W:H; a tie goes to the first in enum order;
- * - any other value outside an enum is left out, so the model default applies;
- * - numbers go to the nearest numeric enum value, or are rounded (integers)
- *   and clamped to the range.
- * Every value not sent as requested gets a note.
+ * Check every value against the endpoint's live schema and send it as given. The rule is shared with the remote MCP
+ * (api-server) and the dashboard /chat (owner, 2026-11-27): a value the model does not offer (a tier, a ratio, a number
+ * out of range, more items than it takes, a field it has no input for) is an error naming what it takes. Nothing is
+ * moved to a nearby value and nothing is left out.
  */
 export async function fitInput(
   modelId: string,
@@ -109,62 +99,52 @@ export async function fitInput(
   const properties = await propsOf(modelId);
   if (!properties) throw new Error(`No schema for ${modelId} in the model catalog.`);
   const input: Record<string, unknown> = {};
-  const notes: string[] = [];
-  // Defaults filled in only to show the price are not the caller's request: no note for them.
-  const fromDefault = new Set<string>();
-  const used = (key: string, from: unknown, to: unknown) => {
-    input[key] = to;
-    if (to !== from && !fromDefault.has(key)) notes.push(`${key} ${String(from)} is not offered by ${modelId}; used ${String(to)}.`);
-  };
-  // Spell out the defaults that set the price, so the estimate shows them.
-  for (const key of showDefaults) {
-    if (properties[key]?.default !== undefined && (wanted[key] === undefined || wanted[key] === null || wanted[key] === '')) {
-      wanted = { ...wanted, [key]: properties[key].default };
-      fromDefault.add(key);
-    }
-  }
   for (const [key, value] of Object.entries(wanted)) {
-    const prop = properties[key];
-    if (!prop || value === undefined || value === null || value === '') continue;
-    if (Array.isArray(value)) {
-      if (!value.length) continue;
-      input[key] = prop.maxItems ? value.slice(0, prop.maxItems) : value;
-      continue;
-    }
-    if (prop.enum?.length) {
-      const members = prop.enum;
-      if (members.includes(value)) {
-        input[key] = value;
-        continue;
-      }
-      if (typeof value === 'number' && members.every((v) => typeof v === 'number')) {
-        used(key, value, (members as number[]).reduce((a, b) => (Math.abs(b - value) < Math.abs(a - value) ? b : a)));
-        continue;
-      }
-      const rank = tierRank(value);
-      const tierMembers = members.filter((v) => tierRank(v) !== undefined);
-      if (rank !== undefined && tierMembers.length && (key === 'resolution' || tierMembers.length === members.length)) {
-        used(key, value, closestMember(tierMembers, tierRank, rank, (a, b) => a.s < b.s));
-        continue;
-      }
-      const ratio = ratioLog(value);
-      if (ratio !== undefined && members.some((v) => ratioLog(v) !== undefined)) {
-        used(key, value, closestMember(members, ratioLog, ratio));
-        continue;
-      }
-      if (!fromDefault.has(key)) notes.push(`${key} ${String(value)} is not accepted by ${modelId}; the model default is used.`);
-      continue;
-    }
-    if (typeof value === 'number' && (prop.type === 'integer' || prop.type === 'number')) {
-      let v = prop.type === 'integer' ? Math.round(value) : value;
-      if (typeof prop.minimum === 'number') v = Math.max(prop.minimum, v);
-      if (typeof prop.maximum === 'number') v = Math.min(prop.maximum, v);
-      used(key, value, v);
-      continue;
-    }
+    if (isEmpty(value)) continue;
+    const why = rejection(modelId, key, properties[key], value);
+    if (why) throw new InputRejected(why, key, value);
     input[key] = value;
   }
-  return { input, notes };
+  // Spell out the defaults that set the price, so the estimate shows them.
+  for (const key of showDefaults) {
+    if (input[key] === undefined && properties[key]?.default !== undefined) input[key] = properties[key].default;
+  }
+  return { input, notes: [] };
+}
+
+/** The /chat models whose endpoint (one per model, from `endpointOf`) takes `value` as `key`. */
+async function whoAccepts(
+  keys: readonly string[],
+  endpointOf: (key: string) => string | undefined,
+  key: string,
+  value: unknown,
+  propsOf: PropsOf,
+): Promise<string> {
+  const takers: string[] = [];
+  for (const k of keys) {
+    const id = endpointOf(k);
+    if (!id) continue;
+    const props = await propsOf(id).catch(() => null);
+    if (props && !rejection(id, key, props[key], value)) takers.push(k);
+  }
+  return takers.length ? `Models that take it: ${takers.join(', ')}.` : 'No /chat model takes it.';
+}
+
+/** fitInput, with the models that would take a refused value added to the error. */
+async function fitOrExplain(
+  modelId: string,
+  wanted: Record<string, unknown>,
+  propsOf: PropsOf,
+  showDefaults: string[],
+  keys: readonly string[],
+  endpointOf: (key: string) => string | undefined,
+): Promise<FittedInput> {
+  try {
+    return await fitInput(modelId, wanted, propsOf, showDefaults);
+  } catch (e) {
+    if (!(e instanceof InputRejected)) throw e;
+    throw new InputRejected(`${e.message} ${await whoAccepts(keys, endpointOf, e.key, e.value, propsOf)}`, e.key, e.value);
+  }
 }
 
 // ---------------------------------------------------------------- images
@@ -193,12 +173,10 @@ export async function planImage(args: ImageArgs, propsOf: PropsOf): Promise<Medi
   const modelId = edit ? model.edit : model.generate;
   const wanted: Record<string, unknown> = { prompt: args.prompt, aspect_ratio: args.aspect_ratio, resolution: args.resolution };
   if (edit) wanted.images = images;
-  const { input, notes } = await fitInput(modelId, wanted, propsOf);
+  const endpointOf = (k: string) => (edit ? IMAGE_MODELS[k as ImageModelKey].edit : IMAGE_MODELS[k as ImageModelKey].generate);
+  const { input } = await fitOrExplain(modelId, wanted, propsOf, [], IMAGE_MODEL_KEYS, endpointOf);
   if (typeof input.prompt === 'string') input.prompt = renameRefs(input.prompt, input, modelId);
-  if (edit && Array.isArray(input.images) && input.images.length < images.length) {
-    notes.push(`${model.label} takes at most ${input.images.length} images, so only the first ${input.images.length} were used.`);
-  }
-  return { modelId, label: model.label, mode: edit ? 'edit' : 'generate', input, notes };
+  return { modelId, label: model.label, mode: edit ? 'edit' : 'generate', input, notes: [] };
 }
 
 // ---------------------------------------------------------------- videos
@@ -232,26 +210,26 @@ function videoModelKey(named?: string): VideoModelKey {
   throw new Error(`Unknown video model "${named}". Choose one of: ${VIDEO_MODEL_KEYS.join(', ')}.`);
 }
 
-/** Which allowed video model + mode accepts every one of these inputs, read from their schemas. */
-async function whoTakes(fields: string[], propsOf: PropsOf): Promise<string> {
+/** Which /chat video model + mode takes every one of these inputs, read from their schemas. */
+async function whoTakes(fields: string[], modes: readonly Mode[], propsOf: PropsOf): Promise<string> {
   const options: string[] = [];
   for (const key of VIDEO_MODEL_KEYS) {
     const e = videoEndpoints(VIDEO_MODELS[key]);
-    for (const [mode, id] of [['text to video', e.text], ['image to video', e.image], ['reference to video', e.reference]] as const) {
+    for (const mode of modes) {
+      const id = e[mode];
       if (!id) continue;
       const props = await propsOf(id).catch(() => null);
-      if (props && fields.every((f) => props[f])) options.push(`${key} (${mode})`);
+      if (props && fields.every((f) => props[f])) options.push(`${key} (${MODE_LABEL[mode]})`);
     }
   }
-  return options.length ? `Models that take them: ${options.join('; ')}.` : 'No available video model takes them.';
+  return options.length ? `Models that take them: ${options.join('; ')}.` : 'No /chat video model takes them.';
 }
 
 /**
- * Pick the model + mode for a video. Candidates are tried in order and the
- * first whose schema takes every input given wins: an exact first frame
- * (image to video), then a dedicated reference-to-video endpoint, then text to
- * video with the references. Other models are tried only when the caller did
- * not name one.
+ * Pick the endpoint for a video on the named model, or on the default one when none is named: an exact first frame goes
+ * to image to video, references to a dedicated reference-to-video endpoint and then to text to video with the
+ * references. The request never moves to another model and a first frame never becomes a reference (owner,
+ * 2026-11-27): what the model cannot take is an error that names the models that can.
  */
 export async function planVideo(args: VideoArgs, action: VideoAction, propsOf: PropsOf): Promise<MediaPlan> {
   const firstFrame = action === 'generate' ? args.first_frame : undefined;
@@ -261,84 +239,63 @@ export async function planVideo(args: VideoArgs, action: VideoAction, propsOf: P
   const refVideos = action === 'generate' && args.reference_videos?.length ? args.reference_videos : undefined;
   const refAudios = args.reference_audios?.length ? args.reference_audios : undefined;
 
-  const pinned = args.model !== undefined && args.model !== '';
-  const first = videoModelKey(args.model);
-  // The default is Wan 3.0. An unnamed request is never moved to another model because it asks for more than the default
-  // offers (a reference count or a resolution tier): it is fitted to the model it started on, as a named model's is.
-  const keys = pinned ? [first] : [first, ...VIDEO_MODEL_KEYS.filter((k) => k !== first)];
+  const key = videoModelKey(args.model);
+  const model = VIDEO_MODELS[key];
+  // H3's native 768p tier is the counterpart of other models' 720p default.
+  const resolution = key === 'minimax-h3' && (args.resolution == null || args.resolution === '' || args.resolution === '720p') ? '768p' : args.resolution;
+  const base = { prompt: args.prompt, resolution };
+  const names = referenceFields(model);
+  const refs = { [names.images]: refImages, [names.videos]: refVideos, [names.audios]: refAudios };
 
-  interface Candidate { key: VideoModelKey; mode: Mode; wanted: Record<string, unknown>; lost: string[] }
-  const candidates: Candidate[] = [];
-  for (const key of keys) {
-    // H3's native 768p tier is the counterpart of other models' 720p default.
-    // Keep explicit supported choices, including cheaper drafts, intact.
-    const resolution = key === 'minimax-h3' && (args.resolution == null || args.resolution === '' || args.resolution === '720p') ? '768p' : args.resolution;
-    const base = { prompt: args.prompt, resolution };
-    const names = referenceFields(VIDEO_MODELS[key]);
-    const refs = { [names.images]: refImages, [names.videos]: refVideos, [names.audios]: refAudios };
-    if (action === 'edit') {
-      candidates.push({ key, mode: 'edit', wanted: { ...base, video, [names.images]: refImages, [names.audios]: refAudios }, lost: [] });
-    } else if (action === 'extend') {
-      candidates.push({ key, mode: 'extend', wanted: { ...base, video, duration: args.duration, last_image: lastFrame }, lost: [] });
-    } else if (firstFrame) {
-      candidates.push({ key, mode: 'image', wanted: { ...base, duration: args.duration, image: firstFrame, last_image: lastFrame, ...refs }, lost: [] });
-      // No exact first frame: the start image becomes a reference instead.
-      const asRef = { ...base, duration: args.duration, aspect_ratio: args.aspect_ratio, ...refs, [names.images]: [firstFrame, ...(refImages ?? [])] };
-      const lost = lastFrame ? ['exact first/last frame'] : ['exact first frame'];
-      candidates.push({ key, mode: 'reference', wanted: asRef, lost });
-      candidates.push({ key, mode: 'text', wanted: asRef, lost });
-    } else if (refImages || refVideos || refAudios) {
-      const withRefs = { ...base, duration: args.duration, aspect_ratio: args.aspect_ratio, ...refs };
-      candidates.push({ key, mode: 'reference', wanted: withRefs, lost: [] });
-      candidates.push({ key, mode: 'text', wanted: withRefs, lost: [] });
-    } else {
-      candidates.push({ key, mode: 'text', wanted: { ...base, duration: args.duration, aspect_ratio: args.aspect_ratio }, lost: [] });
-    }
+  interface Candidate {
+    mode: Mode;
+    wanted: Record<string, unknown>;
   }
-  const endpoints = (key: VideoModelKey) => videoEndpoints(VIDEO_MODELS[key]);
-  const usable = candidates.filter((c) => endpoints(c.key)[c.mode]);
+  let candidates: Candidate[];
+  if (action === 'edit') {
+    candidates = [{ mode: 'edit', wanted: { ...base, video, [names.images]: refImages, [names.audios]: refAudios } }];
+  } else if (action === 'extend') {
+    candidates = [{ mode: 'extend', wanted: { ...base, video, duration: args.duration, last_image: lastFrame } }];
+  } else if (firstFrame) {
+    candidates = [{ mode: 'image', wanted: { ...base, duration: args.duration, image: firstFrame, last_image: lastFrame, ...refs } }];
+  } else if (refImages || refVideos || refAudios) {
+    const withRefs = { ...base, duration: args.duration, aspect_ratio: args.aspect_ratio, ...refs };
+    candidates = [
+      { mode: 'reference', wanted: withRefs },
+      { mode: 'text', wanted: withRefs },
+    ];
+  } else {
+    candidates = [{ mode: 'text', wanted: { ...base, duration: args.duration, aspect_ratio: args.aspect_ratio } }];
+  }
+  const endpoints = videoEndpoints(model);
+  const modes = candidates.map((c) => c.mode);
+  const usable = candidates.filter((c) => endpoints[c.mode]);
   if (!usable.length) {
-    // Turbo tiers have no extend endpoint.
-    throw new Error(`${VIDEO_MODELS[first].label} cannot ${action} videos. Try another video model, such as ${DEFAULT_VIDEO_MODEL}.`);
+    const what = action === 'generate' ? (firstFrame ? 'animate a first frame' : 'generate videos') : `${action} videos`;
+    throw new Error(`${model.label} cannot ${what}. ${await whoTakes(firstFrame ? ['image'] : [], modes, propsOf)}`);
   }
 
-  const needed = (c: Candidate) => OPTIONAL_INPUTS.filter((k) => c.wanted[k] !== undefined);
-  const takesAll = async (c: Candidate) => {
-    const props = await propsOf(endpoints(c.key)[c.mode]!).catch(() => null);
-    return !!props && needed(c).every((k) => props[k]);
-  };
-  let chosen = usable[0];
+  const needed = (c: Candidate) => OPTIONAL_INPUTS.filter((k) => !isEmpty(c.wanted[k]));
+  let chosen: Candidate | undefined;
   for (const c of usable) {
-    if (await takesAll(c)) {
+    const props = await propsOf(endpoints[c.mode]!);
+    if (!props) throw new Error(`No schema for ${endpoints[c.mode]} in the model catalog.`);
+    if (needed(c).every((k) => props[k])) {
       chosen = c;
       break;
     }
   }
+  if (!chosen) {
+    const missing = needed(usable[0]);
+    throw new Error(`${model.label} does not take ${missing.join(', ')} for ${MODE_LABEL[usable[0].mode]}. ${await whoTakes(missing, modes, propsOf)}`);
+  }
 
-  const model = VIDEO_MODELS[chosen.key];
-  const modelId = endpoints(chosen.key)[chosen.mode]!;
+  const mode = chosen.mode;
+  const modelId = endpoints[mode]!;
   // Image-to-video follows the first frame's shape: no aspect_ratio, not even the schema default.
-  const fitted = await fitInput(modelId, chosen.wanted, propsOf, chosen.mode === 'image' ? ['duration', 'resolution'] : ['duration', 'resolution', 'aspect_ratio']);
-  const input = fitted.input;
-  if (chosen.mode === 'image') delete input.aspect_ratio;
+  const endpointOf = (k: string) => videoEndpoints(VIDEO_MODELS[k as VideoModelKey])[mode];
+  const { input } = await fitOrExplain(modelId, chosen.wanted, propsOf, mode === 'image' ? ['duration', 'resolution'] : ['duration', 'resolution', 'aspect_ratio'], VIDEO_MODEL_KEYS, endpointOf);
+  if (mode === 'image') delete input.aspect_ratio;
   if (typeof input.prompt === 'string') input.prompt = renameRefs(input.prompt, input, modelId);
-  const dropped = needed(chosen).filter((k) => input[k] === undefined);
-
-  const notes: string[] = [];
-  if (chosen.key !== usable[0].key || chosen.lost.length) {
-    notes.push(
-      `Used ${model.label} ${MODE_LABEL[chosen.mode]} so that ${needed(chosen).join(', ') || 'the inputs'} could be used` +
-        (chosen.lost.length ? `; this means no ${chosen.lost.join(', ')}: the start image is used as a visual reference` : '') +
-        '.',
-    );
-  }
-  if (dropped.length) {
-    notes.push(
-      pinned
-        ? `${model.label} does not take ${dropped.join(', ')} in any mode, so those were left out; the model you named was not switched. ${await whoTakes(dropped, propsOf)}`
-        : `No available video model takes ${dropped.join(', ')} for this request, so those were left out.`,
-    );
-  }
-  notes.push(...fitted.notes);
-  return { modelId, label: model.label, mode: MODE_LABEL[chosen.mode], input, notes };
+  return { modelId, label: model.label, mode: MODE_LABEL[mode], input, notes: [] };
 }
