@@ -500,7 +500,7 @@ export function createServer(): McpServer {
   }
 
   // Every size any /chat image model offers; each request is fitted to its model's own list.
-  const IMAGE_RESOLUTIONS = ['0.5k', '1k', '1.5k', '2k', '4k'] as const;
+  const IMAGE_RESOLUTIONS = ['0.5k', '1k', '1.5k', '2k', '3k', '4k'] as const;
   const imageShape = {
     prompt: z.string().min(1).describe('Complete visual prompt: subject, composition, style, lighting, mood.'),
     model: z.enum(IMAGE_MODEL_KEYS as [string, ...string[]]).optional().describe('Only when the user names a model; default is the first (Seedream 5.5).'),

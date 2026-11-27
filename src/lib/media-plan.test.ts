@@ -70,6 +70,7 @@ describe('fitInput', () => {
   describe('size tiers', () => {
     const tiers = catalog({
       'bytedance/seedream-v5.0-pro': { resolution: { type: 'string', enum: ['1k', '1.5k', '2k'] } },
+      'bytedance/seedream-v5.5': { resolution: { type: 'string', enum: ['1k', '1.5k', '2k', '3k'] } },
       'google/nano-banana-2/text-to-image': { resolution: { type: 'string', enum: ['0.5k', '1k', '2k', '4k'] } },
       v: { resolution: { type: 'string', enum: ['480p', '720p', '768p', '1080p', '4k'] } },
       h3: { resolution: { type: 'string', enum: ['480p', '540p', '768p', '1080p'] } },
@@ -83,6 +84,14 @@ describe('fitInput', () => {
       });
       expect(await input('bytedance/seedream-v5.0-pro', { resolution: '1.2k' }, tiers)).toEqual({ resolution: '1k' });
       expect(await input('bytedance/seedream-v5.0-pro', { resolution: '0.5k' }, tiers)).toEqual({ resolution: '1k' });
+    });
+
+    it('Seedream 5.5 tops out at 3k', async () => {
+      expect(await fitInput('bytedance/seedream-v5.5', { resolution: '4k' }, tiers)).toEqual({
+        input: { resolution: '3k' },
+        notes: ['resolution 4k is not offered by bytedance/seedream-v5.5; used 3k.'],
+      });
+      expect(await fitInput('bytedance/seedream-v5.5', { resolution: '3k' }, tiers)).toEqual({ input: { resolution: '3k' }, notes: [] });
     });
 
     it('keeps a tier the model offers (Nano Banana 2 has 0.5k)', async () => {

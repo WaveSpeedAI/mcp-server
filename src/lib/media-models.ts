@@ -32,7 +32,7 @@ const image = (id: ImageModelKey, label: string, base: string, generate: string,
 
 /** In menu order; the first is the default. */
 export const IMAGE_MODELS: Record<ImageModelKey, ImageModel> = {
-  'seedream-5-5': image('seedream-5-5', 'Seedream 5.5', 'bytedance/seedream-v5.5', '', ['1k', '1.5k', '2k'], WIDE_RATIOS, 10),
+  'seedream-5-5': image('seedream-5-5', 'Seedream 5.5', 'bytedance/seedream-v5.5', '', ['1k', '1.5k', '2k', '3k'], WIDE_RATIOS, 10),
   'seedream-5-pro': image('seedream-5-pro', 'Seedream 5 Pro', 'bytedance/seedream-v5.0-pro', '', ['1k', '1.5k', '2k'], WIDE_RATIOS, 10),
   'nano-banana-2.1': image('nano-banana-2.1', 'Nano Banana 2.1', 'google/nano-banana-2.1', 'text-to-image', ['1k', '2k', '4k'], NANO_BANANA_2_RATIOS, 14),
   'nano-banana-2': image('nano-banana-2', 'Nano Banana 2', 'google/nano-banana-2', 'text-to-image', ['0.5k', '1k', '2k', '4k'], NANO_BANANA_2_RATIOS, 14),
